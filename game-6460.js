@@ -1,4 +1,4 @@
-﻿// v6.4.2: clean standalone release with character-native cosmetics.
+// v6.4.2: clean standalone release with character-native cosmetics.
 // cannot silently skip a separate loader script.
 window.JM_RECOLOR_DATA={};
 window.getJapaneseMinerRecolor=key=>{
@@ -317,7 +317,7 @@ const DEFAULT_STATE = {
   hints:2, shields:1, active:null, answered:false, shieldArmed:false, lastPracticeDate:null,
   kanaStats:{}, gemInventory:{}, gemCheckpointClaims:{}, kanaTab:"hiragana", lastKana:null, lastGem:null, hiraganaXp:0,
   heartRecoveryEnd:null, ownedPickaxeSkins:["standard"], equippedPickaxeSkin:"standard", ownedWallpapers:["midnight"], equippedWallpaper:"midnight", placementUnlockedThrough:0, developerInfiniteHearts:false,
-  selectedStage:0, soundEnabled:true, voiceEnabled:true, autoSpeak:true, voiceRate:.85, smartReview:true, sessionGoal:20, sessionAnswered:0, sessionCorrect:0, stageXp:[0,0,0,0,0,0,0], clearedStages:[], questionStats:{}
+  selectedStage:0, jlptSectionSelection:{}, jlptVocabularyLevel:{}, soundEnabled:true, voiceEnabled:true, autoSpeak:true, voiceRate:.85, smartReview:true, sessionGoal:20, sessionAnswered:0, sessionCorrect:0, stageXp:[0,0,0,0,0,0,0], clearedStages:[], questionStats:{}
 };
 const PROFILE_INDEX_KEY="jm_profiles";
 const ACTIVE_PROFILE_KEY="jm_active_profile";
@@ -1095,6 +1095,14 @@ function mine(){
       const track=state.tutorTrack;
       pool=pool.filter(q=>q.curriculum!=="tutor" || q.tutorTrack===track);
     }
+  }
+  if(idx>=2) pool=filterJlptPoolForSelection(pool,idx);
+  if(!pool.length){
+    state.active=null;
+    state.answered=false;
+    setMessage("This course section does not have any available questions yet.","wrong");
+    render();
+    return;
   }
   const recent=new Set(state.recentQuestionIds||[]);
   let candidates=pool.filter(q=>!recent.has(q.id));
@@ -2311,6 +2319,163 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
 })();
 
 // Finish restoring all v4.3 profile features after an automatic refresh sign-in.
+if(activeProfileId)render();
+
+
+
+// v6.4.9 - JLPT course-section stops and vocabulary sublevels.
+const JLPT_VOCABULARY_LEVEL_SIZE=10;
+const JLPT_VOCABULARY_UNLOCK_MASTERY=20;
+const JLPT_SECTION_SPECS=[
+  {id:"vocabulary",name:"Vocabulary",icon:"語"},
+  {id:"kanji",name:"Kanji",icon:"字"},
+  {id:"grammar",name:"Grammar",icon:"文"},
+  {id:"reading",name:"Reading",icon:"読"}
+];
+const JLPT_SECTION_IDS=new Set(JLPT_SECTION_SPECS.map(section=>section.id));
+function jlptQuestionSection(question){
+  const kind=String(question?.kind||"").toLowerCase();
+  if(kind.includes("vocab"))return "vocabulary";
+  if(kind.includes("kanji"))return "kanji";
+  if(kind.includes("grammar")||kind==="tutor-verb"||kind==="tutor-particle"||kind==="tutor-pattern"||kind==="tutor-adjective")return "grammar";
+  return "reading";
+}
+function ensureJlptSectionState(target=state){
+  if(!target.jlptSectionSelection||typeof target.jlptSectionSelection!=="object"||Array.isArray(target.jlptSectionSelection))target.jlptSectionSelection={};
+  if(!target.jlptVocabularyLevel||typeof target.jlptVocabularyLevel!=="object"||Array.isArray(target.jlptVocabularyLevel))target.jlptVocabularyLevel={};
+  for(let stage=2;stage<stages.length;stage++){
+    const section=String(target.jlptSectionSelection[stage]||"vocabulary");
+    target.jlptSectionSelection[stage]=JLPT_SECTION_IDS.has(section)?section:"vocabulary";
+    target.jlptVocabularyLevel[stage]=Math.max(0,Number(target.jlptVocabularyLevel[stage])||0);
+  }
+  return target;
+}
+function currentJlptSection(stage=selectedStageIndex()){
+  ensureJlptSectionState();
+  return Number(stage)>=2?state.jlptSectionSelection[Number(stage)]:"vocabulary";
+}
+function jlptQuestionPoolForStage(stage,respectTier=false){
+  stage=Number(stage);
+  let pool=questions.filter(question=>Number(question.stage)===stage&&questionAllowedForSession(question));
+  if(stage!==2)return pool;
+  if(respectTier){
+    const tierOrder={beginner:0,intermediate:1,advanced:2},selectedTier=tierOrder[state.n5Tier||"beginner"];
+    pool=pool.filter(question=>question.tier==null||tierOrder[question.tier]<=selectedTier);
+  }
+  const curriculum=tutorAccessGranted()?(state.n5Curriculum||"mixed"):"standard";
+  if(curriculum==="standard")pool=pool.filter(question=>question.curriculum!=="tutor");
+  if(curriculum==="tutor")pool=pool.filter(question=>question.curriculum==="tutor");
+  if(curriculum!=="standard"&&(state.tutorTrack||"all")!=="all"){
+    const track=state.tutorTrack;
+    pool=pool.filter(question=>question.curriculum!=="tutor"||question.tutorTrack===track);
+  }
+  return pool;
+}
+function jlptSectionQuestionPool(stage,section=currentJlptSection(stage)){
+  return jlptQuestionPoolForStage(stage,false).filter(question=>jlptQuestionSection(question)===section);
+}
+function jlptPoolMastery(pool){
+  if(!Array.isArray(pool)||!pool.length)return 0;
+  return Math.round(pool.reduce((sum,question)=>sum+questionMasteryScore(state.questionStats?.[question.id]),0)/pool.length);
+}
+function jlptSectionMastery(stage,section){return jlptPoolMastery(jlptSectionQuestionPool(stage,section));}
+function jlptVocabularyLevels(stage){
+  const pool=jlptSectionQuestionPool(stage,"vocabulary");
+  const levels=[];
+  for(let index=0;index<pool.length;index+=JLPT_VOCABULARY_LEVEL_SIZE)levels.push(pool.slice(index,index+JLPT_VOCABULARY_LEVEL_SIZE));
+  return levels;
+}
+function jlptVocabularyLevelMastery(stage,index){return jlptPoolMastery(jlptVocabularyLevels(stage)[Number(index)]||[]);}
+function jlptVocabularyLevelUnlocked(stage,index){
+  stage=Number(stage);index=Number(index);
+  if(index<=0)return isStageUnlocked(stage);
+  if(state.clearedStages?.includes(stage)||Number(state.placementUnlockedThrough||0)>stage)return true;
+  return isStageUnlocked(stage)&&jlptVocabularyLevelMastery(stage,index-1)>=JLPT_VOCABULARY_UNLOCK_MASTERY;
+}
+function highestUnlockedJlptVocabularyLevel(stage){
+  const levels=jlptVocabularyLevels(stage);let highest=0;
+  for(let index=1;index<levels.length;index++){if(jlptVocabularyLevelUnlocked(stage,index))highest=index;else break;}
+  return highest;
+}
+function currentJlptVocabularyLevel(stage=selectedStageIndex()){
+  ensureJlptSectionState();
+  stage=Number(stage);
+  const levels=jlptVocabularyLevels(stage),highest=highestUnlockedJlptVocabularyLevel(stage);
+  state.jlptVocabularyLevel[stage]=Math.min(Math.max(0,levels.length-1),highest,Math.max(0,Number(state.jlptVocabularyLevel[stage])||0));
+  return state.jlptVocabularyLevel[stage];
+}
+function filterJlptPoolForSelection(pool,stage){
+  stage=Number(stage);
+  const section=currentJlptSection(stage);
+  let selected=(Array.isArray(pool)?pool:[]).filter(question=>jlptQuestionSection(question)===section);
+  const fullSectionPool=jlptSectionQuestionPool(stage,section);
+  if(section==="vocabulary"){
+    const levelIndex=currentJlptVocabularyLevel(stage),level=jlptVocabularyLevels(stage)[levelIndex]||[];
+    const ids=new Set(level.map(question=>String(question.id)));
+    selected=selected.filter(question=>ids.has(String(question.id)));
+    if(!selected.length)selected=level;
+  }else if(!selected.length){
+    selected=fullSectionPool;
+  }
+  return selected;
+}
+function validJlptQuestionForSelection(question){
+  const stage=selectedStageIndex();
+  if(stage<2)return true;
+  if(!question||Number(question.stage)!==stage)return false;
+  const boss=state.v5?.boss;
+  if(boss?.status==="active"&&Number(question.bossCourseStage)===Number(boss.stage))return true;
+  const section=currentJlptSection(stage);
+  if(jlptQuestionSection(question)!==section)return false;
+  if(section!=="vocabulary")return true;
+  const level=jlptVocabularyLevels(stage)[currentJlptVocabularyLevel(stage)]||[];
+  return level.some(candidate=>String(candidate.id)===String(question.id));
+}
+function repairActiveJlptQuestion(){
+  if(!state.active||selectedStageIndex()<2||validJlptQuestionForSelection(state.active))return false;
+  state.active=null;state.answered=false;state.shieldArmed=false;
+  const area=document.getElementById("challengeArea");
+  if(area)area.innerHTML='<div class="empty">Choose a JLPT course section and level, then tap the rock to begin.</div>';
+  return true;
+}
+function clearJlptRouteQuestion(){
+  state.active=null;state.answered=false;state.shieldArmed=false;state.recentQuestionIds=[];
+}
+function selectJlptSection(stage,section){
+  stage=Number(stage);section=String(section||"");
+  if(stage<2||stage!==selectedStageIndex()||!JLPT_SECTION_IDS.has(section)||!isStageUnlocked(stage))return false;
+  ensureJlptSectionState();
+  state.jlptSectionSelection[stage]=section;
+  clearJlptRouteQuestion();
+  const label=JLPT_SECTION_SPECS.find(item=>item.id===section)?.name||section;
+  const area=document.getElementById("challengeArea");
+  if(area)area.innerHTML=`<div class="empty"><strong>${label}</strong><br>${section==="vocabulary"?"Choose a vocabulary level in the Expedition Hub.":"Tap the rock to begin this course section."}</div>`;
+  save();render();
+  setMessage(`${stages[stage].label} ${label} selected.`,"correct");
+  return true;
+}
+function selectJlptVocabularyLevel(stage,index){
+  stage=Number(stage);index=Number(index);
+  const levels=jlptVocabularyLevels(stage);
+  if(stage<2||stage!==selectedStageIndex()||!levels[index]||!jlptVocabularyLevelUnlocked(stage,index))return false;
+  ensureJlptSectionState();
+  state.jlptSectionSelection[stage]="vocabulary";
+  state.jlptVocabularyLevel[stage]=index;
+  clearJlptRouteQuestion();
+  const area=document.getElementById("challengeArea");
+  if(area)area.innerHTML=`<div class="empty"><strong>Vocabulary Level ${index+1}</strong><br>${levels[index].length} course questions · ${jlptVocabularyLevelMastery(stage,index)}% mastery<br>Tap the rock to begin.</div>`;
+  save();render();
+  setMessage(`${stages[stage].label} Vocabulary Level ${index+1} selected.`,"correct");
+  return true;
+}
+const normalizeStateV649Sections=normalizeState;
+normalizeState=function(raw){return ensureJlptSectionState(normalizeStateV649Sections(raw));};
+const renderV649Sections=render;
+render=function(){ensureJlptSectionState();const repaired=repairActiveJlptQuestion();renderV649Sections();if(repaired)save();};
+const loadProfileV649Sections=loadProfile;
+loadProfile=function(profile){const result=loadProfileV649Sections(profile);ensureJlptSectionState();repairActiveJlptQuestion();render();return result;};
+ensureJlptSectionState();
+repairActiveJlptQuestion();
 if(activeProfileId)render();
 
 
