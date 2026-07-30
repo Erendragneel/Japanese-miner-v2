@@ -312,7 +312,7 @@ questions.forEach((q,i)=>{if(!q.id) q.id=`base-${q.stage}-${i}`;});
 
 const DEFAULT_STATE = {
   supportMode:"guided", n5Tier:"beginner", n5Curriculum:"mixed", tutorTrack:"all",
-  n5AcademyMastery:{}, academyTestBest:0, academyReviewDate:"", recentQuestionIds:[], onboardingComplete:false, placementResult:null,
+  n5AcademyMastery:{}, academyTestBest:0, academyReviewDate:"", recentQuestionIds:[], onboardingComplete:false, placementResult:null, placementTestCompleted:false,
   gems:0, hearts:3, maxHearts:3, level:1, xp:0, streak:0, bestStreak:0, practiceStreak:0,
   hints:2, shields:1, active:null, answered:false, shieldArmed:false, lastPracticeDate:null,
   kanaStats:{}, gemInventory:{}, gemCheckpointClaims:{}, kanaTab:"hiragana", lastKana:null, lastGem:null, hiraganaXp:0,
@@ -389,6 +389,7 @@ function normalizeState(raw){
   next.equippedWallpaper=validWallpaperIds.includes(next.equippedWallpaper)?next.equippedWallpaper:"midnight";
   if(!next.ownedWallpapers.includes(next.equippedWallpaper))next.equippedWallpaper="midnight";
   next.placementUnlockedThrough=Math.max(0,Math.min(stages.length-1,Number(next.placementUnlockedThrough)||0));
+  next.placementTestCompleted=Boolean(next.placementTestCompleted||(next.placementRewardClaimed&&next.placementResult));
   if(next.stats && Object.keys(next.kanaStats).length===0){
     Object.entries(next.stats).forEach(([ch,v])=>{next.kanaStats[ch]={attempts:Number(v.attempts??v.a??0),correct:Number(v.correct??v.c??0)};});
   }
@@ -722,6 +723,7 @@ function render(){
     const vt=document.getElementById('voiceToggle'),at=document.getElementById('autoSpeakToggle'),sr=document.getElementById('smartReviewToggle'),vr=document.getElementById('voiceRate');
     if(vt)vt.checked=state.voiceEnabled;if(at)at.checked=state.autoSpeak;if(sr)sr.checked=state.smartReview;if(vr)vr.value=state.voiceRate;
     const vrl=document.getElementById('voiceRateLabel');if(vrl)vrl.textContent=`${Number(state.voiceRate).toFixed(2)}×`;
+    syncPlacementTestButton();
   }catch(err){ console.error("Core display refresh failed",err); }
   try{ renderPath(); }catch(err){ console.error("Path refresh failed",err); }
   try{ renderKanaChart(); }catch(err){ console.error("Kana chart refresh failed",err); }
@@ -1675,14 +1677,25 @@ const PLACEMENT_TEST_QUESTIONS=[
 ];
 let placementSession=null;
 function placementOverlay(){return document.getElementById('placementOverlay');}
+function placementTestAlreadyCompleted(){return state.placementTestCompleted===true;}
+function syncPlacementTestButton(){
+  const button=document.getElementById('placementTestBtn');
+  if(!button)return;
+  const completed=placementTestAlreadyCompleted();
+  button.disabled=completed;
+  button.textContent=completed?'🧭 Placement Complete':'🧭 Placement Test';
+  button.title=completed?'The placement test can only be completed once per player save.':'Take your one-time placement test.';
+}
 function openPlacementOnboarding(required=false){
   if(!activeProfileId)return;
+  if(!required&&placementTestAlreadyCompleted()){setMessage('The placement test has already been completed for this player save.','');syncPlacementTestButton();return false;}
   placementSession={required,index:0,answers:[],locked:false,mode:'choice'};
   const close=document.getElementById('placementCloseBtn');
   if(close) close.hidden=required;
   placementOverlay().classList.add('open');
   placementOverlay().setAttribute('aria-hidden','false');
   renderPlacementChoice();
+  return true;
 }
 function closePlacementOnboarding(){
   if(placementSession?.required && !state.onboardingComplete)return;
@@ -1710,9 +1723,17 @@ function chooseBrandNew(){
   document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-recommendation"><h3>🌱 Start in the Hiragana Mine</h3><p>You’ll begin with the 46 basic Hiragana characters, build mastery through mining questions, and unlock Katakana when you are ready.</p></div><div class="placement-result-actions"><button id="beginJourneyBtn" class="primary" type="button">Begin Hiragana</button></div></div>`;
   document.getElementById('beginJourneyBtn').addEventListener('click',()=>{closePlacementOnboarding();document.getElementById('rock')?.scrollIntoView({behavior:'smooth',block:'center'});});
 }
+function randomizePlacementTest(){
+  const randomized=shuffle([...PLACEMENT_TEST_QUESTIONS]);
+  PLACEMENT_TEST_QUESTIONS.splice(0,PLACEMENT_TEST_QUESTIONS.length,...randomized);
+  PLACEMENT_TEST_QUESTIONS.forEach(question=>{question.options=shuffle([...question.options]);});
+}
 function startPlacementTest(){
+  if(placementTestAlreadyCompleted()){setMessage('The placement test has already been completed for this player save.','');syncPlacementTestButton();return false;}
+  randomizePlacementTest();
   placementSession.index=0;placementSession.answers=[];placementSession.locked=false;placementSession.mode='test';
   renderPlacementQuestion();
+  return true;
 }
 function renderPlacementQuestion(){
   const q=PLACEMENT_TEST_QUESTIONS[placementSession.index];
@@ -1759,13 +1780,13 @@ function finishPlacementTest(){
     state.n5Tier=n5Score>=75?'advanced':n5Score>=45?'intermediate':'beginner';
     state.supportMode=n5Score>=75?'challenge':n5Score>=45?'standard':'guided';
   }else state.supportMode='guided';
-  state.onboardingComplete=true;state.active=null;state.answered=false;
+  state.onboardingComplete=true;state.placementTestCompleted=true;state.active=null;state.answered=false;
   state.placementResult={date:Date.now(),route,hiragana:hiraScore,katakana:kataScore,n5:n5Score};
   save();render();placementSession.required=false;
   document.getElementById('placementCloseBtn').hidden=false;
-  document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid"><div class="placement-score"><strong>${hiraScore}%</strong><span>Hiragana</span></div><div class="placement-score"><strong>${kataScore}%</strong><span>Katakana</span></div><div class="placement-score"><strong>${n5Score}%</strong><span>JLPT N5</span></div></div><div class="placement-recommendation"><h3>🧭 ${title}</h3><p>${description}</p></div><div class="placement-note">Recommended N5 track: <strong>${state.n5Tier}</strong> · Reading support: <strong>${state.supportMode}</strong>. These can be changed later in Quick Stats.</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin at ${route==='n5'?'JLPT N5':route==='katakana'?'Katakana':'Hiragana'}</button><button id="retakePlacementBtn" type="button">Retake test</button></div></div>`;
+  document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid"><div class="placement-score"><strong>${hiraScore}%</strong><span>Hiragana</span></div><div class="placement-score"><strong>${kataScore}%</strong><span>Katakana</span></div><div class="placement-score"><strong>${n5Score}%</strong><span>JLPT N5</span></div></div><div class="placement-recommendation"><h3>🧭 ${title}</h3><p>${description}</p></div><div class="placement-note">This one-time placement result is now saved. Recommended N5 track: <strong>${state.n5Tier}</strong> · Reading support: <strong>${state.supportMode}</strong>.</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin at ${route==='n5'?'JLPT N5':route==='katakana'?'Katakana':'Hiragana'}</button></div></div>`;
   document.getElementById('acceptPlacementBtn').addEventListener('click',()=>{closePlacementOnboarding();document.getElementById('rock')?.scrollIntoView({behavior:'smooth',block:'center'});});
-  document.getElementById('retakePlacementBtn').addEventListener('click',startPlacementTest);
+  syncPlacementTestButton();
 }
 document.getElementById('placementCloseBtn')?.addEventListener('click',closePlacementOnboarding);
 document.getElementById('placementTestBtn')?.addEventListener('click',()=>openPlacementOnboarding(false));
@@ -1980,7 +2001,7 @@ function repairPlacementUnlocks(){
 function grantPlacementReward(routeStage,overall){if(state.placementRewardClaimed)return {nuggets:0,hints:0,shields:0};let nuggets=2500,hints=1,shields=0;if(routeStage>=2){nuggets=10000;hints=3;shields=1;}if(routeStage>=3){nuggets=25000;hints=5;shields=2;}if(routeStage>=4){nuggets=50000;hints=8;shields=3;}if(routeStage>=5){nuggets=100000;hints=12;shields=5;}if(routeStage>=6){nuggets=250000;hints=20;shields=10;}if(overall>=90)nuggets=Math.round(nuggets*1.25);addStoneChange(nuggets,Math.min(gemTiers.length-1,routeStage+6));state.hints=Number(state.hints||0)+hints;state.shields=Number(state.shields||0)+shields;state.placementRewardClaimed=true;return {nuggets,hints,shields};}
 const finishPlacementTestV34=finishPlacementTest;
 finishPlacementTest=function(){const scores={};['hiragana','katakana','n5','n4','n3','n2','n1'].forEach(s=>scores[s]=placementSectionScore(s));let stage=0;if(scores.hiragana>=70)stage=1;if(stage===1&&scores.katakana>=70)stage=2;if(stage===2&&scores.n5>=65)stage=3;if(stage===3&&scores.n4>=65)stage=4;if(stage===4&&scores.n3>=65)stage=5;if(stage===5&&scores.n2>=65)stage=6; // N1 score refines reward/readiness but N1 remains the highest placement.
- unlockThroughStage(stage);state.selectedStage=stage;state.supportMode=stage>=4?'challenge':stage>=2?'standard':'guided';state.n5Tier=scores.n5>=75?'advanced':scores.n5>=45?'intermediate':'beginner';state.onboardingComplete=true;state.active=null;state.answered=false;const overall=Math.round(Object.values(scores).reduce((a,b)=>a+b,0)/7);const reward=grantPlacementReward(stage,overall);state.placementResult={date:Date.now(),route:stages[stage].label.toLowerCase(),overall,...scores,reward};save();render();placementSession.required=false;document.getElementById('placementCloseBtn').hidden=false;const scoreCards=Object.entries(scores).map(([k,v])=>`<div class="placement-score"><strong>${v}%</strong><span>${k==='hiragana'?'Hiragana':k==='katakana'?'Katakana':'JLPT '+k.toUpperCase()}</span></div>`).join('');document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid">${scoreCards}</div><div class="placement-recommendation"><h3>🧭 Start in the ${stages[stage].name}</h3><p>Your placement is based on passing each level in order. Every earlier mine remains available for review.</p></div><div class="placement-note"><strong>Placement reward:</strong> ${reward.nuggets.toLocaleString()} Nuggets, ${reward.hints} hints, and ${reward.shields} shields.${reward.nuggets===0?' Your one-time placement reward was already claimed.':''}</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin ${stages[stage].label}</button><button id="retakePlacementBtn" type="button">Retake test</button></div></div>`;document.getElementById('acceptPlacementBtn').addEventListener('click',()=>{closePlacementOnboarding();document.getElementById('rock')?.scrollIntoView({behavior:'smooth',block:'center'});});document.getElementById('retakePlacementBtn').addEventListener('click',startPlacementTest);};
+ unlockThroughStage(stage);state.selectedStage=stage;state.supportMode=stage>=4?'challenge':stage>=2?'standard':'guided';state.n5Tier=scores.n5>=75?'advanced':scores.n5>=45?'intermediate':'beginner';state.onboardingComplete=true;state.placementTestCompleted=true;state.active=null;state.answered=false;const overall=Math.round(Object.values(scores).reduce((a,b)=>a+b,0)/7);const reward=grantPlacementReward(stage,overall);state.placementResult={date:Date.now(),route:stages[stage].label.toLowerCase(),overall,...scores,reward};save();render();placementSession.required=false;document.getElementById('placementCloseBtn').hidden=false;const scoreCards=Object.entries(scores).map(([k,v])=>`<div class="placement-score"><strong>${v}%</strong><span>${k==='hiragana'?'Hiragana':k==='katakana'?'Katakana':'JLPT '+k.toUpperCase()}</span></div>`).join('');document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid">${scoreCards}</div><div class="placement-recommendation"><h3>🧭 Start in the ${stages[stage].name}</h3><p>Your one-time placement result is saved. Every earlier mine remains available for review.</p></div><div class="placement-note"><strong>Placement reward:</strong> ${reward.nuggets.toLocaleString()} Nuggets, ${reward.hints} hints, and ${reward.shields} shields.</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin ${stages[stage].label}</button></div></div>`;document.getElementById('acceptPlacementBtn').addEventListener('click',()=>{syncPlacementTestButton();closePlacementOnboarding();document.getElementById('rock')?.scrollIntoView({behavior:'smooth',block:'center'});});};
 
 // v3.4 polish: correct advanced placement labels and make the launch button honor the selected JLPT mine.
 const enterSelectedMineButton=document.getElementById('enterN5MineBtn');
@@ -2073,16 +2094,6 @@ applyWallpaper();
 
 // v3.7 — Collapsible categories and properly randomized placement answers.
 (function(){
-  const originalStartPlacementTest = startPlacementTest;
-  startPlacementTest = function(){
-    // Shuffle the visible answer positions independently for every question on every attempt.
-    // The stored answer remains a string, so grading is unaffected.
-    PLACEMENT_TEST_QUESTIONS.forEach(q=>{
-      q.options = shuffle([...q.options]);
-    });
-    originalStartPlacementTest();
-  };
-
   function panelTitle(panel){
     const title = panel.querySelector(':scope > .section-title, :scope > .academy-launch-head .section-title');
     if(title) return title;
