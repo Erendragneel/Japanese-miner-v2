@@ -327,9 +327,9 @@ const DEFAULT_STATE = {
   n5AcademyMastery:{}, academyTestBest:0, academyReviewDate:"", recentQuestionIds:[], onboardingComplete:false, placementResult:null, placementTestCompleted:false,
   gems:0, hearts:3, maxHearts:3, level:1, xp:0, streak:0, bestStreak:0, practiceStreak:0,
   hints:2, shields:1, active:null, answered:false, shieldArmed:false, lastPracticeDate:null,
-  kanaStats:{}, gemInventory:{}, gemCheckpointClaims:{}, kanaTab:"hiragana", lastKana:null, lastGem:null, hiraganaXp:0,
+  kanaStats:{}, gemInventory:{}, gemCheckpointClaims:{}, gemUnlockRewards:{}, kanaTab:"hiragana", lastKana:null, lastGem:null, hiraganaXp:0,
   heartRecoveryEnd:null, ownedPickaxeSkins:["standard"], equippedPickaxeSkin:"standard", ownedWallpapers:["midnight"], equippedWallpaper:"midnight", placementUnlockedThrough:0, developerInfiniteHearts:false,
-  selectedStage:0, jlptSectionSelection:{}, jlptVocabularyLevel:{}, soundEnabled:true, voiceEnabled:true, autoSpeak:true, voiceRate:.85, smartReview:true, sessionGoal:20, sessionAnswered:0, sessionCorrect:0, stageXp:[0,0,0,0,0,0,0], clearedStages:[], questionStats:{}
+  selectedStage:0, jlptSectionSelection:{}, jlptVocabularyLevel:{}, jlptReviewCheckpoints:{}, soundEnabled:true, voiceEnabled:true, autoSpeak:true, voiceRate:.85, smartReview:true, sessionGoal:20, sessionAnswered:0, sessionCorrect:0, stageXp:[0,0,0,0,0,0,0], clearedStages:[], questionStats:{}
 };
 const PROFILE_INDEX_KEY="jm_profiles";
 const ACTIVE_PROFILE_KEY="jm_active_profile";
@@ -351,6 +351,26 @@ function repairTutorAccessState(target=state){
   const restrictedIds=new Set(questions.filter(tutorQuestion).map(question=>String(question.id)));
   if(target.v5?.boss?.questionIds?.some(id=>restrictedIds.has(String(id)))){target.v5.boss=null;changed=true;}
   return changed;
+}
+function syncOwnerTutorControls(idx=selectedStageIndex()){
+  const settings=document.querySelector('.learning-settings');
+  let root=document.getElementById('ownerTutorControls');
+  if(!settings||!tutorAccessGranted()||Number(idx)!==2){root?.remove();return;}
+  if(!root){
+    root=document.createElement('div');
+    root.id='ownerTutorControls';
+    root.className='owner-tutor-controls';
+    root.setAttribute('aria-label','Owner-only tutor curriculum controls');
+    root.innerHTML=`<label id="n5CurriculumWrap" for="n5Curriculum">N5 curriculum source<select id="n5Curriculum"><option value="mixed">Mixed — standard N5 + tutor lessons</option><option value="tutor">Tutor Curriculum only</option><option value="standard">Standard N5 only</option></select></label><label id="tutorTrackWrap" for="tutorTrack">Tutor lesson track<select id="tutorTrack"><option value="all">All tutor material</option><option value="vocabulary">Core vocabulary</option><option value="verbs">Verb groups and conjugation</option><option value="particles">Particles</option><option value="patterns">Wants, requests, ability and plans</option><option value="adjectives">Adjectives and descriptions</option><option value="conversation">Daily conversation</option></select></label><div id="tutorMasteryLabel" class="small">Tutor curriculum mastery: 0%</div><div class="small">Changing either owner setting starts a fresh question.</div>`;
+    settings.querySelector('label[for="supportMode"]')?.after(root);
+    root.querySelector('#n5Curriculum').addEventListener('change',e=>{if(!tutorAccessGranted()){root.remove();return;}state.n5Curriculum=e.target.value;state.active=null;state.answered=false;save();render();setMessage(`N5 curriculum changed to ${e.target.options[e.target.selectedIndex].text}. Start a new question.`,"correct");});
+    root.querySelector('#tutorTrack').addEventListener('change',e=>{if(!tutorAccessGranted()){root.remove();return;}state.tutorTrack=e.target.value;state.active=null;state.answered=false;save();render();setMessage(`Tutor lesson track changed to ${e.target.options[e.target.selectedIndex].text}. Start a new question.`,"correct");});
+  }
+  const curriculum=root.querySelector('#n5Curriculum'),track=root.querySelector('#tutorTrack'),trackWrap=root.querySelector('#tutorTrackWrap'),mastery=root.querySelector('#tutorMasteryLabel');
+  curriculum.value=state.n5Curriculum||'mixed';
+  track.value=state.tutorTrack||'all';
+  trackWrap.hidden=state.n5Curriculum==='standard';
+  mastery.textContent=`Tutor curriculum mastery: ${tutorCurriculumMastery()}%`;
 }
 
 function profileStorageKey(id){ return `jm_profile_${id}`; }
@@ -386,6 +406,7 @@ function normalizeState(raw){
   next.kanaStats=next.kanaStats||{};
   next.gemInventory=next.gemInventory||{};
   next.gemCheckpointClaims=next.gemCheckpointClaims&&typeof next.gemCheckpointClaims==="object"&&!Array.isArray(next.gemCheckpointClaims)?next.gemCheckpointClaims:{};
+  next.gemUnlockRewards=next.gemUnlockRewards&&typeof next.gemUnlockRewards==="object"&&!Array.isArray(next.gemUnlockRewards)?next.gemUnlockRewards:{};
   next.kanaTab=next.kanaTab||"hiragana";
   next.lastKana=next.lastKana||null;
   next.lastGem=next.lastGem||null;
@@ -454,18 +475,21 @@ function loadProfile(profile){
   state=normalizeState(raw);
   const tutorStateRepaired=repairTutorAccessState();
   const dailyStateChanged=applyDailyDecay();
+  const unlockedGemRewards=grantUnlockedGemRewards();
   document.getElementById("activePlayerName").textContent=profile.name;
   const developerBtn=document.getElementById("developerBtn");
   if(developerBtn) developerBtn.hidden=!isDeveloperSession;
   const developerName=document.getElementById("developerProfileName");
   if(developerName) developerName.textContent=profile.name;
-  if(tutorStateRepaired||dailyStateChanged) save();
+  if(tutorStateRepaired||dailyStateChanged||unlockedGemRewards.length) save();
   if(!appStarted){appStarted=true;render();startRecoveryClock();}
   else render();
+  if(unlockedGemRewards.length)setMessage(`Mine access reward: ${unlockedGemRewards.length} unlocked gemstone${unlockedGemRewards.length===1?' was':'s were'} added to this save. Use the heart upgrades in Practice Health when ready.`,"correct");
   requestAnimationFrame(()=>{if(activeProfileId)setAuthOverlayVisible(false);});
 }
 function logout(){
   save();activeProfileId=null;isDeveloperSession=false;
+  syncOwnerTutorControls();
   closeDeveloperPanel();localStorage.removeItem(ACTIVE_PROFILE_KEY);
   document.getElementById("activePlayerName").textContent="Not signed in";
   setAuthOverlayVisible(true);
@@ -539,24 +563,8 @@ function syncSelectedStageUI(){
   if(quickMineLabel) quickMineLabel.textContent=state.active&&!state.answered?"Return to Question":"New Question";
   if(soundToggle) soundToggle.checked=state.soundEnabled!==false;
   const supportMode=document.getElementById("supportMode");
-  const n5Tier=document.getElementById("n5Tier");
-  const n5TierWrap=document.getElementById("n5TierWrap");
-  const n5Curriculum=document.getElementById("n5Curriculum");
-  const n5CurriculumWrap=document.getElementById("n5CurriculumWrap");
-  const tutorTrack=document.getElementById("tutorTrack");
-  const tutorTrackWrap=document.getElementById("tutorTrackWrap");
-  const tutorMasteryLabel=document.getElementById("tutorMasteryLabel");
-  const tutorLockedNotice=document.getElementById("tutorLockedNotice");
-  const tutorAccess=tutorAccessGranted();
   if(supportMode) supportMode.value=state.supportMode||"guided";
-  if(n5Tier) n5Tier.value=state.n5Tier||"beginner";
-  if(n5Curriculum) n5Curriculum.value=tutorAccess?(state.n5Curriculum||"mixed"):"standard";
-  if(tutorTrack) tutorTrack.value=state.tutorTrack||"all";
-  if(n5TierWrap) n5TierWrap.hidden=idx!==2;
-  if(n5CurriculumWrap) n5CurriculumWrap.hidden=idx!==2||!tutorAccess;
-  if(tutorTrackWrap) tutorTrackWrap.hidden=idx!==2||!tutorAccess||state.n5Curriculum==="standard";
-  if(tutorMasteryLabel){tutorMasteryLabel.hidden=idx!==2||!tutorAccess;tutorMasteryLabel.textContent=`Tutor curriculum mastery: ${tutorCurriculumMastery()}%`;}
-  if(tutorLockedNotice)tutorLockedNotice.hidden=idx!==2||tutorAccess;
+  syncOwnerTutorControls(idx);
 }
 
 function selectStage(index,openCourse=false){
@@ -828,6 +836,7 @@ function buyMaxHeart(){
   state.gemInventory[stone]=owned-1;
   state.maxHearts++;
   state.hearts++;
+  save();
   setMessage(`${stone} consumed. Maximum health increased to ${state.maxHearts}.`,"correct");
   render();
 }
@@ -836,6 +845,19 @@ function gemCheckpointThreshold(stage,checkpoint){const requirement=Number(STAGE
 function gemCheckpointDrop(gemName){return GEM_CHECKPOINT_DROPS.find(drop=>drop.gem===gemName)||null;}
 function gemCheckpointClaimed(drop){return !!drop&&!!state.gemCheckpointClaims?.[gemCheckpointKey(drop.stage,drop.checkpoint)];}
 function gemArtMarkup(gemName,extraClass=""){const index=gemTiers.findIndex(gem=>gem.name===gemName),col=Math.max(0,index%5),row=Math.max(0,Math.floor(index/5));return `<span class="scientific-gem-art ${extraClass}" style="background-position:${col*25}% ${row*50}%" role="img" aria-label="${gemName} gemstone"></span>`;}
+function grantUnlockedGemRewards(){
+  state.gemInventory=state.gemInventory&&typeof state.gemInventory==="object"?state.gemInventory:{};
+  state.gemUnlockRewards=state.gemUnlockRewards&&typeof state.gemUnlockRewards==="object"&&!Array.isArray(state.gemUnlockRewards)?state.gemUnlockRewards:{};
+  const awarded=[];
+  gemTiers.forEach(gem=>{
+    if(!isStageUnlocked(gem.minStage)||state.gemUnlockRewards[gem.name])return;
+    state.gemInventory[gem.name]=Number(state.gemInventory[gem.name]||0)+1;
+    state.gemUnlockRewards[gem.name]=Date.now();
+    awarded.push(gem);
+  });
+  if(awarded.length){const gem=awarded.at(-1),drop=gemCheckpointDrop(gem.name);state.lastGem={name:gem.name,icon:gem.icon,stage:gem.minStage,checkpoint:drop?.checkpoint||0,source:"mine-unlock"};}
+  return awarded;
+}
 function claimReachedGemCheckpoints(stage,previousXp=0,currentXp=Number(state.stageXp?.[stage]||0)){state.gemCheckpointClaims=state.gemCheckpointClaims&&typeof state.gemCheckpointClaims==="object"?state.gemCheckpointClaims:{};const awarded=[];GEM_CHECKPOINT_DROPS.filter(drop=>drop.stage===Number(stage)).forEach(drop=>{const threshold=gemCheckpointThreshold(drop.stage,drop.checkpoint),key=gemCheckpointKey(drop.stage,drop.checkpoint);if(currentXp<threshold||state.gemCheckpointClaims[key])return;const gem=gemTiers.find(item=>item.name===drop.gem);if(!gem)return;state.gemCheckpointClaims[key]=Date.now();state.gemInventory[gem.name]=Number(state.gemInventory[gem.name]||0)+1;state.lastGem={name:gem.name,icon:gem.icon,stage:drop.stage,checkpoint:drop.checkpoint,source:"checkpoint"};awarded.push({...drop,threshold,gem,previousXp,currentXp});});return awarded;}
 function kanaFromQuestion(q){
   if(!q) return null;
@@ -907,9 +929,9 @@ function renderGemCollection(){
     const d=document.createElement("div"); d.className="gem-row"+(state.lastGem&&state.lastGem.name===g.name?" recent":"");
     const unlocked=isStageUnlocked(g.minStage);
     const source=g.minStage===0?"Hiragana":g.minStage===1?"Katakana":g.minStage===2?"JLPT N5":stages[g.minStage]?.label||"Advanced";
-    const drop=gemCheckpointDrop(g.name),claimed=gemCheckpointClaimed(drop),threshold=drop?gemCheckpointThreshold(drop.stage,drop.checkpoint):0,currentXp=Number(state.stageXp?.[drop?.stage]||0),progress=threshold?Math.min(100,Math.round(currentXp/threshold*100)):0;
+    const drop=gemCheckpointDrop(g.name),claimed=gemCheckpointClaimed(drop),starterGranted=!!state.gemUnlockRewards?.[g.name],threshold=drop?gemCheckpointThreshold(drop.stage,drop.checkpoint):0,currentXp=Number(state.stageXp?.[drop?.stage]||0),progress=threshold?Math.min(100,Math.round(currentXp/threshold*100)):0;
     d.classList.toggle("locked",!unlocked);
-    d.innerHTML=`<div class="gem-identity">${gemArtMarkup(g.name)}<div><strong>${g.name}</strong><div class="small">${g.desc}</div><div class="gem-checkpoint-status ${claimed?'claimed':''}">${claimed?'✓ Checkpoint drop claimed':unlocked?`Checkpoint ${drop.checkpoint} · ${drop.checkpoint*20}% ${source} progress`:`🔒 Unlocks in ${source}`}</div>${unlocked&&!claimed?`<div class="gem-checkpoint-progress"><i style="width:${progress}%"></i></div>`:''}</div></div><div class="gem-row-value"><strong>x${count}</strong><div class="gem-value">${g.value.toLocaleString()} Nuggets each</div><div class="small">${source} checkpoint ${drop.checkpoint}</div></div>`;
+    d.innerHTML=`<div class="gem-identity">${gemArtMarkup(g.name)}<div><strong>${g.name}</strong><div class="small">${g.desc}</div>${starterGranted?'<div class="gem-checkpoint-status claimed">✓ Mine-access starter specimen rewarded</div>':''}<div class="gem-checkpoint-status ${claimed?'claimed':''}">${claimed?'✓ Checkpoint drop claimed':unlocked?`Checkpoint ${drop.checkpoint} · ${drop.checkpoint*20}% ${source} progress`:`🔒 Unlocks in ${source}`}</div>${unlocked&&!claimed?`<div class="gem-checkpoint-progress"><i style="width:${progress}%"></i></div>`:''}</div></div><div class="gem-row-value"><strong>x${count}</strong><div class="gem-value">${g.value.toLocaleString()} Nuggets each</div><div class="small">${source} checkpoint ${drop.checkpoint}</div></div>`;
     box.appendChild(d);
   });
   document.getElementById("totalGemstones").textContent=total;
@@ -917,7 +939,7 @@ function renderGemCollection(){
   document.getElementById("uniqueGemstones").textContent=unique;
   document.getElementById("gemSpeciesTotal").textContent=gemTiers.length;
   const latest=document.getElementById("latestGemProgress");
-  if(state.lastGem){const latestDrop=gemCheckpointDrop(state.lastGem.name);latest.style.display="flex";latest.innerHTML=`${gemArtMarkup(state.lastGem.name,'latest-gem-art')}<span>Latest checkpoint drop: <strong>${state.lastGem.name}</strong> from ${stages[latestDrop?.stage]?.label||'the mine'} checkpoint ${latestDrop?.checkpoint||state.lastGem.checkpoint||'—'}. Collection count: <strong>x${state.gemInventory[state.lastGem.name]||0}</strong>.</span>`; }
+  if(state.lastGem){const latestDrop=gemCheckpointDrop(state.lastGem.name),starter=state.lastGem.source==="mine-unlock";latest.style.display="flex";latest.innerHTML=`${gemArtMarkup(state.lastGem.name,'latest-gem-art')}<span>${starter?'Latest mine-access reward':'Latest checkpoint drop'}: <strong>${state.lastGem.name}</strong> from ${stages[latestDrop?.stage]?.label||'the mine'}${starter?'':` checkpoint ${latestDrop?.checkpoint||state.lastGem.checkpoint||'—'}`}. Collection count: <strong>x${state.gemInventory[state.lastGem.name]||0}</strong>.</span>`; }
   else latest.style.display="none";
 }
 
@@ -1211,6 +1233,7 @@ function answer(opt,button){
       state.clearedStages.push(answeredStage);
       addStoneChange(STAGE_CLEAR_REWARDS[answeredStage],Math.min(gemTiers.length-1,answeredStage*2+3));
     }
+    const unlockedGemRewards=grantUnlockedGemRewards();
 
     const kanaProgress=recordKana(true);
     markPracticeToday();
@@ -1232,10 +1255,11 @@ function answer(opt,button){
 
     const masteryText=kanaProgress ? ` ${kanaProgress.char} mastery is now ${masteryScore(kanaProgress.char)}% (${kanaProgress.correctCount}/${kanaProgress.attempts} correct).` : "";
     const currentMastery=stageMastery(answeredStage);
-    const clearText=justCleared?` 🎉 ${stages[answeredStage].name} course cleared with ${currentMastery}% mastery! ${answeredStage<stages.length-1?`The guardian gate is ready in Expedition Hub: score 25/25 within 60 seconds to unlock ${stages[answeredStage+1].name}. `:"The final guardian gate is ready in Expedition Hub. "}+${STAGE_CLEAR_REWARDS[answeredStage].toLocaleString()} bonus Nuggets.`:"";
+    const clearText=justCleared?` 🎉 ${stages[answeredStage].name} course cleared with ${currentMastery}% mastery! ${answeredStage<stages.length-1?`The guardian gate is ready in Expedition Hub: score 25/25 within 5 minutes to unlock ${stages[answeredStage+1].name}. `:"The final guardian gate is ready in Expedition Hub. "}+${STAGE_CLEAR_REWARDS[answeredStage].toLocaleString()} bonus Nuggets.`:"";
     const nextCheckpointDrop=GEM_CHECKPOINT_DROPS.find(drop=>drop.stage===answeredStage&&!gemCheckpointClaimed(drop));
     const checkpointText=checkpointDrops.length?` 💎 Checkpoint reward: ${checkpointDrops.map(drop=>`${drop.gem.icon} ${drop.gem.name}`).join(", ")}.`:nextCheckpointDrop?` Next gem drop: ${nextCheckpointDrop.gem} at checkpoint ${nextCheckpointDrop.checkpoint} (${nextCheckpointDrop.checkpoint*20}% course XP).`:" All gemstone checkpoints in this mine are claimed.";
-    setMessage(`Correct! +${xpGain} Mine XP. Mine mastery: ${currentMastery}/${STAGE_MASTERY_REQUIREMENTS[answeredStage]}%.${checkpointText}${masteryText}${clearText}`,"correct");
+    const unlockRewardText=unlockedGemRewards.length?` Mine access reward: ${unlockedGemRewards.length} newly unlocked gemstone${unlockedGemRewards.length===1?'':'s'} added to your save.`:"";
+    setMessage(`Correct! +${xpGain} Mine XP. Mine mastery: ${currentMastery}/${STAGE_MASTERY_REQUIREMENTS[answeredStage]}%.${checkpointText}${unlockRewardText}${masteryText}${clearText}`,"correct");
     try{ floatText(checkpointDrops.length?`${checkpointDrops.at(-1).gem.icon} Checkpoint drop!`:`+${xpGain} XP`); }catch(err){ console.error("Reward animation failed",err); }
   }else{
     playFeedbackSound(false);
@@ -1291,14 +1315,15 @@ function buy(type){
   render();
 }
 function resetSave(){
-  if(!activeProfileId) return;
-  if(confirm("Reset all progress for this player profile?")){
-    state=normalizeState(structuredClone(DEFAULT_STATE));
-    save();
-    setMessage("This player profile has been reset.","");
-    render();
-  }
+  if(!activeProfileId) return false;
+  if(!confirm("Reset all progress for this player profile?")) return false;
+  state=normalizeState(structuredClone(DEFAULT_STATE));
+  save();
+  setMessage("This player profile has been reset.","");
+  render();
+  return true;
 }
+window.resetJapaneseMinerSave=resetSave;
 function nextMine(){
   state.active=null; state.answered=false; state.shieldArmed=false;
   document.getElementById("challengeArea").innerHTML='<div class="small">Tap the rock to mine another challenge.</div>';
@@ -1313,16 +1338,44 @@ function floatText(t){
   document.body.appendChild(d);setTimeout(()=>d.remove(),900);
 }
 
+const PAGE_SCROLL_LOCK_SELECTOR=[
+  '#authOverlay:not(.hidden):not(.auth-dismissed):not([hidden])',
+  '.placement-overlay.open','.academy-overlay.open','.game-menu-overlay.open','.shop-overlay.open',
+  '.feature-center-overlay.open','.developer-overlay.open','.study-calendar-overlay.open',
+  '.utility-overlay.open','.cosmetic-preview-overlay.open','.v5-overlay.open','.v6-overlay.open'
+].join(',');
+let pageScrollObserver=null;
+function syncPageScrollLock(){
+  if(!document.body||!document.documentElement)return false;
+  const drawerOpen=!!document.getElementById('statsDrawer')?.classList.contains('open');
+  document.body.classList.toggle('stats-open',drawerOpen);
+  const locked=drawerOpen||!!document.querySelector(PAGE_SCROLL_LOCK_SELECTOR);
+  document.documentElement.classList.toggle('page-scroll-locked',locked);
+  document.body.classList.toggle('page-scroll-locked',locked);
+  document.body.style.removeProperty('overflow');
+  document.documentElement.style.removeProperty('overflow');
+  return locked;
+}
+function initPageScrollGuard(){
+  if(pageScrollObserver||!document.body)return;
+  pageScrollObserver=new MutationObserver(syncPageScrollLock);
+  pageScrollObserver.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden','aria-hidden']});
+  syncPageScrollLock();
+}
+window.syncJapaneseMinerPageScroll=syncPageScrollLock;
+initPageScrollGuard();
+
 function setStatsDrawer(open){
   if(open) syncSelectedStageUI();
   const drawer=document.getElementById("statsDrawer");
   const overlay=document.getElementById("statsOverlay");
   const quick=document.getElementById("quickStatsBtn");
-  drawer.classList.toggle("open",open);
-  overlay.classList.toggle("open",open);
+  drawer?.classList.toggle("open",open);
+  overlay?.classList.toggle("open",open);
   document.body.classList.toggle("stats-open",open);
-  drawer.setAttribute("aria-hidden",String(!open));
-  quick.setAttribute("aria-expanded",String(open));
+  syncPageScrollLock();
+  drawer?.setAttribute("aria-hidden",String(!open));
+  quick?.setAttribute("aria-expanded",String(open));
 }
 function jumpToSection(id){
   setStatsDrawer(false);
@@ -1332,9 +1385,6 @@ function jumpToSection(id){
 document.getElementById("quickMineBtn").onclick=quickMineAction;
 document.getElementById("soundToggle").addEventListener("change",e=>{state.soundEnabled=e.target.checked;save();if(state.soundEnabled)playFeedbackSound(true);});
 document.getElementById("supportMode").addEventListener("change",e=>{state.supportMode=e.target.value;state.active=null;state.answered=false;save();render();setMessage(`Support mode changed to ${e.target.options[e.target.selectedIndex].text}. Start a new question.`,"correct");});
-document.getElementById("n5Tier").addEventListener("change",e=>{state.n5Tier=e.target.value;state.active=null;state.answered=false;save();render();setMessage(`N5 track changed to ${e.target.options[e.target.selectedIndex].text}. Start a new question.`,"correct");});
-document.getElementById("n5Curriculum").addEventListener("change",e=>{if(!tutorAccessGranted()){e.target.value="standard";state.n5Curriculum="standard";save();render();setMessage("Private Tutor Curriculum requires the password-protected owner account.","wrong");return;}state.n5Curriculum=e.target.value;state.active=null;state.answered=false;save();render();setMessage(`N5 curriculum changed to ${e.target.options[e.target.selectedIndex].text}. Start a new question.`,"correct");});
-document.getElementById("tutorTrack").addEventListener("change",e=>{if(!tutorAccessGranted()){e.target.value="all";state.tutorTrack="all";save();render();setMessage("Private Tutor Curriculum requires the password-protected owner account.","wrong");return;}state.tutorTrack=e.target.value;state.active=null;state.answered=false;save();render();setMessage(`Tutor lesson track changed to ${e.target.options[e.target.selectedIndex].text}. Start a new question.`,"correct");});
 document.getElementById("quickStatsBtn")?.addEventListener("click",()=>setStatsDrawer(true));
 document.getElementById("headerStatsBtn").onclick=()=>setStatsDrawer(true);
 document.getElementById("closeStatsBtn").onclick=()=>setStatsDrawer(false);
@@ -1347,7 +1397,6 @@ document.getElementById("rock").onclick=mine;
 document.getElementById("hintBtn").onclick=useHint;
 document.getElementById("shieldBtn").onclick=armShield;
 document.getElementById("nextBtn").onclick=nextMine;
-document.getElementById("resetBtn").onclick=resetSave;
 document.getElementById("logoutBtn").onclick=logout;
 
 function openDeveloperPanel(){
@@ -1355,13 +1404,13 @@ function openDeveloperPanel(){
   const overlay=document.getElementById("developerOverlay");
   overlay.classList.add("open");overlay.setAttribute("aria-hidden","false");
   document.getElementById("adminInfiniteHearts").checked=!!state.developerInfiniteHearts;
-  document.body.style.overflow="hidden";
+  syncPageScrollLock();
 }
 function closeDeveloperPanel(){
   const overlay=document.getElementById("developerOverlay");
   if(!overlay) return;
   overlay.classList.remove("open");overlay.setAttribute("aria-hidden","true");
-  document.body.style.overflow="";
+  syncPageScrollLock();
 }
 function developerMessage(text,error=false){
   const el=document.getElementById("developerMessage");if(!el)return;
@@ -1569,7 +1618,7 @@ function renderAcademy(){
  const box=document.getElementById('academyContent');if(!box)return;document.querySelectorAll('[data-academy-tab]').forEach(b=>b.classList.toggle('primary',b.dataset.academyTab===academyTab));const c=academyCounts();
  if(academyTab==='overview')box.innerHTML=`<div class="n5-hub-actions"><button id="hubEnterMineBtn" class="primary" type="button">⛏️ Enter N5 Mine</button><span class="small">Mine questions update the same vocabulary, kanji, grammar, and reading mastery shown here${tutorAccessGranted()?', including your private Tutor Curriculum':''}.</span></div><div class="academy-metrics"><div><strong>${c.readiness}%</strong><span>Estimated readiness</span></div><div><strong>${c.vocabKnown}</strong><span>Vocabulary mastered</span></div><div><strong>${c.kanjiKnown}</strong><span>Kanji mastered</span></div><div><strong>${c.grammarKnown}</strong><span>Grammar mastered</span></div></div><div class="academy-roadmap">${[['Vocabulary',c.vocabKnown,1000],['Kanji',c.kanjiKnown,120],['Grammar',c.grammarKnown,90],['Reading',c.readingKnown,N5_READING_PASSAGES.length]].map(([n,v,t])=>`<div><div class="progress-label"><span>${n}</span><strong>${v}/${t}</strong></div>${progressBar(v/t*100)}</div>`).join('')}</div><div class="academy-callout"><strong>Recommended next step</strong><p>${c.kanjiKnown<30?'Study the first kanji set and answer its mine questions.':c.grammarKnown<20?'Continue the core grammar path.':'Complete today’s review and try a mini test.'}</p></div>`;
  if(academyTab==='vocabulary'){
-  const words=academyVocabularyBank();box.innerHTML=`<div class="academy-toolbar"><strong>Vocabulary course</strong><span>${words.length} reference words currently loaded • progression target: 1,000</span></div><div class="lesson-grid">${Array.from({length:20},(_,i)=>{const start=i*50,end=start+50,known=Object.keys(state.n5AcademyMastery||{}).filter(k=>k.startsWith('vocab:')&&Number(k.split(':')[1])>=start&&Number(k.split(':')[1])<end&&academyItemMastery(k)>=75).length;return `<button class="lesson-button" data-vocab-lesson="${i}" type="button"><strong>Lesson ${i+1}</strong><span>${known}/50 mastered</span>${progressBar(known/50*100)}</button>`}).join('')}</div><div id="vocabLessonWords" class="study-grid"><p class="small">Choose a lesson. Loaded reference words fill the earliest lessons; later slots preserve the complete 1,000-word progression structure.</p></div>`;
+  const words=academyVocabularyBank();box.innerHTML=`<div class="academy-toolbar"><strong>Vocabulary course</strong><span>${words.length} reference words currently loaded • progression target: 1,000</span></div><div class="lesson-grid">${Array.from({length:40},(_,i)=>{const start=i*25,end=start+25,known=Object.keys(state.n5AcademyMastery||{}).filter(k=>k.startsWith('vocab:')&&Number(k.split(':')[1])>=start&&Number(k.split(':')[1])<end&&academyItemMastery(k)>=75).length;return `<button class="lesson-button" data-vocab-lesson="${i}" type="button"><strong>Lesson ${i+1}</strong><span>${known}/25 mastered</span>${progressBar(known/25*100)}</button>`}).join('')}</div><div id="vocabLessonWords" class="study-grid"><p class="small">Choose a lesson. Each session contains 25 words from the complete 1,000-word progression.</p></div>`;
  }
  if(academyTab==='kanji')box.innerHTML=`<div class="academy-toolbar"><strong>120 Essential Kanji</strong><span>Tap any kanji for readings, meaning, examples, and mastery.</span></div><div class="kanji-academy-grid">${N5_KANJI_LIST.slice(0,120).map(k=>{const m=academyItemMastery('kanji:'+k);return `<button data-kanji-card="${k}" class="kanji-academy-cell" type="button"><strong>${k}</strong><span>${m}%</span></button>`}).join('')}</div><div id="kanjiDetail"></div>`;
  if(academyTab==='grammar')box.innerHTML=`<div class="academy-toolbar"><strong>90 N5 Grammar Points</strong><span>Reference cards and mine-ready examples.</span></div><div class="study-grid">${N5_GRAMMAR_POINTS.slice(0,90).map((g,i)=>academyCard('grammar:'+i,g[0],g[1],`<p class="jp-example">${g[2]}</p>`)).join('')}</div>`;
@@ -1586,7 +1635,7 @@ function renderAcademy(){
  box.querySelectorAll('[data-review-id]').forEach(b=>b.addEventListener('click',()=>academyMaster(b.dataset.reviewId,25)));
  box.querySelectorAll('[data-start-test]').forEach(b=>b.addEventListener('click',()=>startAcademyTest(Number(b.dataset.startTest))));
 }
-function showVocabLesson(i){const words=academyVocabularyBank().slice(i*50,i*50+50),box=document.getElementById('vocabLessonWords');if(!box)return;box.innerHTML=words.length?words.map((w,j)=>academyCard('vocab:'+(i*50+j),w.jp,w.reading,`<p>${w.en}</p>`)).join(''):`<p class="academy-callout">This lesson is reserved in the 1,000-word progression. Additions to the course bank will populate it without changing player progress.</p>`;box.querySelectorAll('[data-master-id]').forEach(b=>b.addEventListener('click',()=>academyMaster(b.dataset.masterId)));}
+function showVocabLesson(i){const words=academyVocabularyBank().slice(i*25,i*25+25),box=document.getElementById('vocabLessonWords');if(!box)return;box.innerHTML=words.length?words.map((w,j)=>academyCard('vocab:'+(i*25+j),w.jp,w.reading,`<p>${w.en}</p>`)).join(''):`<p class="academy-callout">This lesson is reserved in the 1,000-word progression. Additions to the course bank will populate it without changing player progress.</p>`;box.querySelectorAll('[data-master-id]').forEach(b=>b.addEventListener('click',()=>academyMaster(b.dataset.masterId)));}
 function showKanjiDetail(k){const info=N5_KANJI_INFO[k]||['—','repetition mark'];const i=N5_KANJI_LIST.indexOf(k),examples=(typeof n5Vocab!=='undefined'?n5Vocab:[]).filter(x=>x[0].includes(k)).slice(0,4);const box=document.getElementById('kanjiDetail');box.innerHTML=academyCard('kanji:'+k,`<span class="kanji-hero">${k}</span>`,`${i+1} of 120`,`<p><strong>Readings:</strong> ${info[0]}</p><p><strong>Meaning:</strong> ${info[1]}</p><p><strong>Example words:</strong> ${examples.length?examples.map(x=>`${x[0]} (${x[1]}) — ${x[2]}`).join('<br>'):'Reference examples unlock as vocabulary grows.'}</p><p class="small">Stroke-order reference: write top-to-bottom and left-to-right, following standard kanji stroke principles.</p>`);box.querySelector('[data-master-id]').addEventListener('click',()=>academyMaster('kanji:'+k));}
 
 function startAcademyTest(count){const pool=questions.filter(q=>q.stage===2&&questionAllowedForSession(q));if(!pool.length)return;let score=0;for(let i=0;i<count;i++){const q=pool[Math.floor(Math.random()*pool.length)];if(Math.random()<(questionMasteryScore(state.questionStats[q.id])/100*.6+.25))score++;}const pct=Math.round(score/count*100);state.academyTestBest=Math.max(state.academyTestBest,pct);save();alert(`Practice simulation complete: ${score}/${count} (${pct}%).\n\nThis simulation estimates performance from your recorded mastery. Mine questions directly to improve it.`);renderAcademy();}
@@ -1659,7 +1708,7 @@ renderAcademy=function(){
   else if(t.matches('[data-reading-quiz]')){const i=Number(t.dataset.readingQuiz),p=N5_READING_PASSAGES[i],wrong=shuffle(N5_READING_PASSAGES.filter((_,j)=>j!==i).map(x=>x[3])).slice(0,3);v3QuizCard(p[2],[p[3],...wrong],p[3],good=>v3SetMastery('reading:'+i,good?25:-5));}
   else if(t.matches('[data-course-answer]'))v3HandleQuizAnswer(t.dataset.courseAnswer,t);
   else if(t.matches('[data-course-back]')){academyView.quiz=null;renderAcademy();}
-  else if(t.matches('[data-review-type]')){const type=t.dataset.reviewType,index=t.dataset.reviewIndex;if(type==='word'){academyTab='vocabulary';academyView.lesson=Math.floor(Number(index)/50);academyView.word=Number(index);}else if(type==='grammar'){academyTab='grammar';academyView.grammar=Number(index);}else{academyTab='kanji';renderAcademyV2();setTimeout(()=>showKanjiDetail(index),0);return;}renderAcademy();}
+  else if(t.matches('[data-review-type]')){const type=t.dataset.reviewType,index=t.dataset.reviewIndex;if(type==='word'){academyTab='vocabulary';academyView.lesson=Math.floor(Number(index)/25);academyView.word=Number(index);}else if(type==='grammar'){academyTab='grammar';academyView.grammar=Number(index);}else{academyTab='kanji';renderAcademyV2();setTimeout(()=>showKanjiDetail(index),0);return;}renderAcademy();}
  };
 };
 
@@ -1803,7 +1852,7 @@ function finishPlacementTest(){
   state.placementResult={date:Date.now(),route,hiragana:hiraScore,katakana:kataScore,n5:n5Score};
   save();render();placementSession.required=false;
   document.getElementById('placementCloseBtn').hidden=false;
-  document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid"><div class="placement-score"><strong>${hiraScore}%</strong><span>Hiragana</span></div><div class="placement-score"><strong>${kataScore}%</strong><span>Katakana</span></div><div class="placement-score"><strong>${n5Score}%</strong><span>JLPT N5</span></div></div><div class="placement-recommendation"><h3>🧭 ${title}</h3><p>${description}</p></div><div class="placement-note">This one-time placement result is now saved. Recommended N5 track: <strong>${state.n5Tier}</strong> · Reading support: <strong>${state.supportMode}</strong>.</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin at ${route==='n5'?'JLPT N5':route==='katakana'?'Katakana':'Hiragana'}</button></div></div>`;
+  document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid"><div class="placement-score"><strong>${hiraScore}%</strong><span>Hiragana</span></div><div class="placement-score"><strong>${kataScore}%</strong><span>Katakana</span></div><div class="placement-score"><strong>${n5Score}%</strong><span>JLPT N5</span></div></div><div class="placement-recommendation"><h3>🧭 ${title}</h3><p>${description}</p></div><div class="placement-note">This one-time placement result is now saved. Reading support: <strong>${state.supportMode}</strong>.</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin at ${route==='n5'?'JLPT N5':route==='katakana'?'Katakana':'Hiragana'}</button></div></div>`;
   document.getElementById('acceptPlacementBtn').addEventListener('click',()=>{closePlacementOnboarding();document.getElementById('rock')?.scrollIntoView({behavior:'smooth',block:'center'});});
   syncPlacementTestButton();
 }
@@ -2047,7 +2096,7 @@ function grantPlacementReward(routeStage,overall){
 }
 const finishPlacementTestV34=finishPlacementTest;
 finishPlacementTest=function(){const scores={};['hiragana','katakana','n5','n4','n3','n2','n1'].forEach(s=>scores[s]=placementSectionScore(s));let stage=0;if(scores.hiragana>=70)stage=1;if(stage===1&&scores.katakana>=70)stage=2;if(stage===2&&scores.n5>=65)stage=3;if(stage===3&&scores.n4>=65)stage=4;if(stage===4&&scores.n3>=65)stage=5;if(stage===5&&scores.n2>=65)stage=6; // N1 score refines reward/readiness but N1 remains the highest placement.
- unlockThroughStage(stage);state.selectedStage=stage;state.supportMode=stage>=4?'challenge':stage>=2?'standard':'guided';state.n5Tier=scores.n5>=75?'advanced':scores.n5>=45?'intermediate':'beginner';state.onboardingComplete=true;state.placementTestCompleted=true;state.active=null;state.answered=false;const overall=Math.round(Object.values(scores).reduce((a,b)=>a+b,0)/7);const reward=grantPlacementReward(stage,overall);state.placementResult={date:Date.now(),route:stages[stage].label.toLowerCase(),overall,...scores,reward};save();render();placementSession.required=false;document.getElementById('placementCloseBtn').hidden=false;const scoreCards=Object.entries(scores).map(([k,v])=>`<div class="placement-score"><strong>${v}%</strong><span>${k==='hiragana'?'Hiragana':k==='katakana'?'Katakana':'JLPT '+k.toUpperCase()}</span></div>`).join('');const placementBonus=reward.bonusPercent?` <strong>Mastery bonus: +${reward.bonusPercent}% Nuggets.</strong>`:'';document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid">${scoreCards}</div><div class="placement-recommendation"><h3>🧭 Start in the ${stages[stage].name}</h3><p>Your one-time placement result is saved. Every earlier mine remains available for review.</p></div><div class="placement-note"><strong>${stages[stage].label} placement reward:</strong> ${reward.nuggets.toLocaleString()} Nuggets, ${reward.hints} hints, and ${reward.shields} shields.${placementBonus}</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin ${stages[stage].label}</button></div></div>`;document.getElementById('acceptPlacementBtn').addEventListener('click',()=>{syncPlacementTestButton();closePlacementOnboarding();document.getElementById('rock')?.scrollIntoView({behavior:'smooth',block:'center'});});};
+ unlockThroughStage(stage);const unlockedGemRewards=grantUnlockedGemRewards();state.selectedStage=stage;state.supportMode=stage>=4?'challenge':stage>=2?'standard':'guided';state.n5Tier=scores.n5>=75?'advanced':scores.n5>=45?'intermediate':'beginner';state.onboardingComplete=true;state.placementTestCompleted=true;state.active=null;state.answered=false;const overall=Math.round(Object.values(scores).reduce((a,b)=>a+b,0)/7);const reward=grantPlacementReward(stage,overall);state.placementResult={date:Date.now(),route:stages[stage].label.toLowerCase(),overall,...scores,reward,unlockedGemRewards:unlockedGemRewards.map(gem=>gem.name)};save();render();placementSession.required=false;document.getElementById('placementCloseBtn').hidden=false;const scoreCards=Object.entries(scores).map(([k,v])=>`<div class="placement-score"><strong>${v}%</strong><span>${k==='hiragana'?'Hiragana':k==='katakana'?'Katakana':'JLPT '+k.toUpperCase()}</span></div>`).join('');const placementBonus=reward.bonusPercent?` <strong>Mastery bonus: +${reward.bonusPercent}% Nuggets.</strong>`:'';const gemBonus=unlockedGemRewards.length?` <strong>Mine access bonus: ${unlockedGemRewards.length} unlocked gemstones added for heart upgrades.</strong>`:'';document.getElementById('placementContent').innerHTML=`<div class="placement-results"><div class="placement-score-grid">${scoreCards}</div><div class="placement-recommendation"><h3>🧭 Start in the ${stages[stage].name}</h3><p>Your one-time placement result is saved. Every earlier mine remains available for review.</p></div><div class="placement-note"><strong>${stages[stage].label} placement reward:</strong> ${reward.nuggets.toLocaleString()} Nuggets, ${reward.hints} hints, and ${reward.shields} shields.${placementBonus}${gemBonus}</div><div class="placement-result-actions"><button id="acceptPlacementBtn" class="primary" type="button">Begin ${stages[stage].label}</button></div></div>`;document.getElementById('acceptPlacementBtn').addEventListener('click',()=>{syncPlacementTestButton();closePlacementOnboarding();document.getElementById('rock')?.scrollIntoView({behavior:'smooth',block:'center'});});};
 
 // v3.4 polish: correct advanced placement labels and make the launch button honor the selected JLPT mine.
 const enterSelectedMineButton=document.getElementById('enterN5MineBtn');
@@ -2092,12 +2141,12 @@ const WALLPAPERS=[
  {id:'paper',name:'Study Notebook',cost:800000000,desc:'A clean grid-paper look inspired by Japanese study notebooks.',preview:'linear-gradient(rgba(255,255,255,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.12) 1px,transparent 1px),#26314a'}
 ];
 let activeShopTab='pickaxes';
-function applyWallpaper(){document.body.dataset.wallpaper=state.equippedWallpaper||'midnight';}
-function openGameMenu(){document.getElementById('gameMenuOverlay')?.classList.add('open');document.getElementById('gameMenuOverlay')?.setAttribute('aria-hidden','false');document.getElementById('gameMenuBtn')?.setAttribute('aria-expanded','true');document.body.style.overflow='hidden';}
-function closeGameMenu(){document.getElementById('gameMenuOverlay')?.classList.remove('open');document.getElementById('gameMenuOverlay')?.setAttribute('aria-hidden','true');document.getElementById('gameMenuBtn')?.setAttribute('aria-expanded','false');document.body.style.overflow='';}
+function applyWallpaper(){document.body.dataset.wallpaper=state.equippedWallpaper||'midnight';document.body.dataset.theme=state.colorTheme||'midnight';}
+function openGameMenu(){setStatsDrawer(false);document.getElementById('gameMenuOverlay')?.classList.add('open');document.getElementById('gameMenuOverlay')?.setAttribute('aria-hidden','false');document.getElementById('gameMenuBtn')?.setAttribute('aria-expanded','true');syncPageScrollLock();}
+function closeGameMenu(){document.getElementById('gameMenuOverlay')?.classList.remove('open');document.getElementById('gameMenuOverlay')?.setAttribute('aria-hidden','true');document.getElementById('gameMenuBtn')?.setAttribute('aria-expanded','false');syncPageScrollLock();}
 function returnToGameMenu(closeCurrent){if(typeof closeCurrent==='function')closeCurrent();openGameMenu();}
-function openShop(tab='pickaxes'){activeShopTab=tab;closeGameMenu();document.getElementById('shopOverlay')?.classList.add('open');document.getElementById('shopOverlay')?.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';renderShop();}
-function closeShop(){document.getElementById('shopOverlay')?.classList.remove('open');document.getElementById('shopOverlay')?.setAttribute('aria-hidden','true');document.body.style.overflow='';}
+function openShop(tab='pickaxes'){activeShopTab=tab;closeGameMenu();document.getElementById('shopOverlay')?.classList.add('open');document.getElementById('shopOverlay')?.setAttribute('aria-hidden','false');syncPageScrollLock();renderShop();}
+function closeShop(){document.getElementById('shopOverlay')?.classList.remove('open');document.getElementById('shopOverlay')?.setAttribute('aria-hidden','true');syncPageScrollLock();}
 function renderShop(){
  const balance=document.getElementById('shopNuggetBalance');if(balance)balance.textContent=totalStoneValue().toLocaleString();
  document.querySelectorAll('[data-shop-tab]').forEach(b=>b.classList.toggle('primary',b.dataset.shopTab===activeShopTab));
@@ -2109,9 +2158,11 @@ function renderShop(){
   const grid=document.getElementById('menuPickaxeShop');
   PICKAXE_SKINS.forEach(skin=>{const owned=state.ownedPickaxeSkins.includes(skin.id),equipped=state.equippedPickaxeSkin===skin.id;const card=document.createElement('article');card.className='cosmetic-card'+(equipped?' equipped':'');card.innerHTML=`<div class="cosmetic-preview"><span style="${skin.id==='standard'?'':pickaxePreviewStyle(skin.id)}">${skin.icon}</span></div><h3>${skin.name}</h3><p>${skin.desc}</p><button type="button" ${equipped?'disabled':''}>${equipped?'Equipped':owned?'Equip':`Preview — ${skin.cost.toLocaleString()} Nuggets`}</button>`;const button=card.querySelector('button');button.addEventListener('click',()=>{requestPickaxePurchase(skin,button);if(owned)renderShop();});grid.appendChild(card);});
  }else if(activeShopTab==='wallpapers'){
-  box.innerHTML='<div class="cosmetic-grid" id="wallpaperShop"></div>';
+  box.innerHTML='<div class="shop-section-heading"><span>Free appearance</span><h3>Bright game colors</h3><p>Choose one free color treatment or one wallpaper. Selecting either automatically turns the other off.</p></div><div class="theme-choice-grid wallpaper-theme-grid" id="wallpaperThemeShop"></div><div class="shop-section-heading"><span>Permanent collection</span><h3>Wallpapers</h3><p>Unlock a wallpaper with Nuggets, then equip it here.</p></div><div class="cosmetic-grid" id="wallpaperShop"></div>';
+  const themeGrid=document.getElementById('wallpaperThemeShop');
+  COLOR_THEMES.forEach(([value,name])=>{const selected=state.colorTheme===value;const button=document.createElement('button');button.type='button';button.className=selected?'selected':'';button.innerHTML=`<span class="theme-swatch theme-${value}"></span><span>${name}<small>Free</small></span>`;button.addEventListener('click',()=>{state.colorTheme=value;state.equippedWallpaper='midnight';applyWallpaper();save();render();renderShop();setMessage(`${name} game colors selected. Wallpaper cleared.`,'correct');});themeGrid.appendChild(button);});
   const grid=document.getElementById('wallpaperShop');
-  WALLPAPERS.forEach(w=>{const owned=state.ownedWallpapers.includes(w.id),equipped=state.equippedWallpaper===w.id;const card=document.createElement('article');card.className='cosmetic-card'+(equipped?' equipped':'');card.innerHTML=`<div class="wallpaper-preview" style="background:${w.preview};background-size:${w.id==='paper'?'18px 18px':'cover'}"></div><h3>${w.name}</h3><p>${w.desc}</p><button type="button" ${equipped?'disabled':''}>${equipped?'Equipped':owned?'Use wallpaper':`Buy — ${w.cost.toLocaleString()} Nuggets`}</button>`;card.querySelector('button').addEventListener('click',()=>{if(owned){state.equippedWallpaper=w.id;applyWallpaper();save();renderShop();setMessage(`${w.name} wallpaper equipped.`,'correct');}else if(spendStoneValue(w.cost)){state.ownedWallpapers.push(w.id);state.equippedWallpaper=w.id;applyWallpaper();save();render();renderShop();setMessage(`${w.name} purchased and equipped!`,'correct');}else setMessage(`You need ${w.cost.toLocaleString()} Nuggets for ${w.name}.`,'wrong');});grid.appendChild(card);});
+  WALLPAPERS.forEach(w=>{const owned=state.ownedWallpapers.includes(w.id),equipped=state.colorTheme==='midnight'&&state.equippedWallpaper===w.id;const card=document.createElement('article');card.className='cosmetic-card'+(equipped?' equipped':'');card.innerHTML=`<div class="wallpaper-preview" style="background:${w.preview};background-size:${w.id==='paper'?'18px 18px':'cover'}"></div><h3>${w.name}</h3><p>${w.desc}</p><button type="button" ${equipped?'disabled':''}>${equipped?'Equipped':owned?'Use wallpaper':`Buy — ${w.cost.toLocaleString()} Nuggets`}</button>`;card.querySelector('button').addEventListener('click',()=>{if(owned){state.colorTheme='midnight';state.equippedWallpaper=w.id;applyWallpaper();save();render();renderShop();setMessage(`${w.name} wallpaper equipped. Bright game colors cleared.`,'correct');}else if(spendStoneValue(w.cost)){state.ownedWallpapers.push(w.id);state.colorTheme='midnight';state.equippedWallpaper=w.id;applyWallpaper();save();render();renderShop();setMessage(`${w.name} purchased and equipped!`,'correct');}else setMessage(`You need ${w.cost.toLocaleString()} Nuggets for ${w.name}.`,'wrong');});grid.appendChild(card);});
  }else{
   const prices=currentShopPrices();box.innerHTML=`<div class="shop-supply-list"><article class="shop-supply"><div><strong>💡 Hint Crystal</strong><p>Removes one incorrect choice.</p></div><button type="button" data-supply="hint">Buy — ${prices.hint.toLocaleString()}</button></article><article class="shop-supply"><div><strong>🛡️ Life Shield</strong><p>Protects one heart after a wrong answer.</p></div><button type="button" data-supply="shield">Buy — ${prices.shield.toLocaleString()}</button></article><article class="shop-supply"><div><strong>❤️ Heart Restore</strong><p>Restores all current hearts.</p></div><button type="button" data-supply="heart">Buy — ${prices.heart.toLocaleString()}</button></article></div>`;box.querySelectorAll('[data-supply]').forEach(b=>b.addEventListener('click',()=>{buy(b.dataset.supply);renderShop();}));
  }
@@ -2200,7 +2251,6 @@ document.addEventListener('click',event=>{
     if(!owned){
       event.preventDefault();event.stopImmediatePropagation();
       const price=V43_COSMETIC_PRICES[key]||0;
-      if(!cosmetic.closest('#shopContent')){openShop('character');setMessage('This style is available in the Character section of the Shop.','correct');return;}
       if(typeof window.previewJapaneseMinerCosmetic==='function'){window.previewJapaneseMinerCosmetic({type:'character',key,value,price,name:cosmetic.querySelector('span:last-child')?.childNodes[0]?.textContent?.trim()||'Character style',source:cosmetic});return;}
       if(!spendStoneValue(price)){setMessage(`You need ${price.toLocaleString()} Nuggets to unlock this style.`,'wrong');return;}
       state.ownedCosmetics.push(id);state.character[key]=value;save();cosmetic.closest('.character-customizer')?.querySelectorAll(`[data-character-key="${key}"]`).forEach(x=>x.classList.toggle('selected',x===cosmetic));cosmetic.classList.remove('locked');cosmetic.classList.add('owned');const priceLabel=cosmetic.querySelector('small');if(priceLabel)priceLabel.textContent='Owned';render();
@@ -2230,6 +2280,7 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
     state.ownedCosmetics=Array.isArray(state.ownedCosmetics)?state.ownedCosmetics:['hairStyle:short','hairColor:brown','shirt:miner','pants:denim','accessory:none'];
     ['hairStyle:short','hairColor:brown','shirt:miner','pants:denim','accessory:none'].forEach(id=>{if(!state.ownedCosmetics.includes(id))state.ownedCosmetics.push(id);});
     state.colorTheme=['midnight','sunrise','sakura','aqua','candy'].includes(state.colorTheme)?state.colorTheme:'midnight';
+    if(state.colorTheme!=='midnight')state.equippedWallpaper='midnight';
     state.questData=state.questData||{day:'',week:'',daily:{},weekly:{}};
     if(state.questData.day!==todayKey()) state.questData={...state.questData,day:todayKey(),daily:{}};
     if(state.questData.week!==weekKey()) state.questData={...state.questData,week:weekKey(),weekly:{}};
@@ -2285,18 +2336,18 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
     document.querySelectorAll('[data-feature-tab]').forEach(b=>b.addEventListener('click',()=>renderFeatureCenter(b.dataset.featureTab)));
   }
   let featureTab='quests';
-  function openFeatureCenter(tab='quests'){featureShell();featureTab=tab==='mistakes'?'notebook':tab;document.getElementById('featureCenterOverlay').classList.add('open');document.body.style.overflow='hidden';renderFeatureCenter(featureTab);}
+  function openFeatureCenter(tab='quests'){featureShell();featureTab=tab==='mistakes'?'notebook':tab;document.getElementById('featureCenterOverlay').classList.add('open');syncPageScrollLock();renderFeatureCenter(featureTab);}
   window.openJapaneseMinerNotebook=()=>openFeatureCenter('notebook');
   window.openJapaneseMinerQuests=()=>openFeatureCenter('quests');
-  function closeFeatureCenter(){document.getElementById('featureCenterOverlay')?.classList.remove('open');document.body.style.overflow='';}
+  function closeFeatureCenter(){document.getElementById('featureCenterOverlay')?.classList.remove('open');syncPageScrollLock();}
   function progressCard(q,type){const value=Math.min(q.goal,q.metric()),claimed=state.questData[type]['claimed_'+q.id],reward=questRewardText(q);return `<article class="quest-card"><div><strong>${q.name}</strong><p>${q.desc}</p><small class="quest-reward-line">Reward: ${reward}</small></div><div class="quest-progress"><span>${value}/${q.goal}</span><div class="mini-progress"><i style="width:${Math.round(value/q.goal*100)}%"></i></div></div><button data-claim-quest="${type}:${q.id}" ${value<q.goal||claimed?'disabled':''}>${claimed?'Claimed':value>=q.goal?'Claim rewards':'In progress'}</button></article>`;}
 
   const CHARACTER_OPTIONS={
     skin:[['light','Light'],['warm','Warm'],['tan','Tan'],['deep','Deep']],
     hairStyle:[['short','Short'],['spiky','Spiky'],['bob','Bob'],['long','Long'],['bun','Bun'],['buzz','Buzz'],['ponytail','Ponytail'],['wavy','Wavy'],['undercut','Undercut'],['twintails','Twin Tails'],['regalsweep','Regal Sweep'],['sidesweep','Side Sweep'],['flamespikes','Flame Spikes'],['texturedcrop','Textured Crop']],
     hairColor:[['black','Black'],['brown','Brown'],['blonde','Blonde'],['red','Red'],['blue','Blue'],['pink','Pink'],['silver','Silver'],['purple','Purple'],['teal','Teal'],['green','Emerald Green']],
-    shirt:[['miner','Miner Coat'],['academy','Academy'],['hoodie','Hoodie'],['festival','Festival'],['armor','Crystal Armor'],['casual','Casual']],
-    pants:[['denim','Denim'],['black','Black'],['khaki','Khaki'],['white','White'],['purple','Purple'],['red','Red']],
+    shirt:[['miner','Golden'],['academy','Blue'],['hoodie','Purple'],['festival','Rose Pink'],['armor','Teal'],['casual','Green']],
+    pants:[['denim','Denim Blue'],['black','Black'],['khaki','Khaki'],['white','White'],['purple','Purple'],['red','Red']],
     accessory:[['none','None'],['glasses','Glasses'],['headband','Headband'],['helmet','Miner Helmet'],['earrings','Earrings'],['scarf','Scarf']]
   };
   const COSMETIC_PRICES={hairStyle:2500,hairColor:1200,shirt:4000,pants:3000,accessory:3500};
@@ -2309,8 +2360,8 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
     return {
       skin:art('skin',c.skin),
       hair:art('hair',c.hairColor),
-      shirt:jacket!=='none'?art('jacket',jacket):art('shirt',c.shirt),
-      pants:art('pants',c.pants),
+      shirt:jacket!=='none'?art('jacket',jacket):'',
+      pants:'',
       gloves:gloves==='none'?'':art('gloves',gloves),
       shoes:art('shoes',shoes)
     };
@@ -2326,11 +2377,13 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
   window.syncJapaneseMinerRenderedLayers=syncRenderedAvatarLayers;
   window.addEventListener('jm-recolors-ready',()=>document.querySelectorAll('.miner-avatar').forEach(syncRenderedAvatarLayers));
   if(Object.keys(window.JM_RECOLOR_DATA||{}).length)queueMicrotask(()=>document.querySelectorAll('.miner-avatar').forEach(syncRenderedAvatarLayers));
+  const CHARACTER_PORTRAIT_IMAGES={short:'short.png',spiky:'anime-miner-v1.png',bob:'bob.png',long:'long.png',bun:'bun.png',buzz:'buzz.png',ponytail:'ponytail.png',wavy:'wavy.png',undercut:'undercut.png',twintails:'twintails.png',regalsweep:'regal-sweep.png',sidesweep:'side-sweep.png',flamespikes:'flame-spikes.png',texturedcrop:'textured-crop.png'};
+  function characterPortraitSource(style=state.character?.hairStyle){return CHARACTER_PORTRAIT_IMAGES[style]||CHARACTER_PORTRAIT_IMAGES.spiky;}
+  function characterPortraitMarkup(){return `<img class="header-avatar-photo" src="${characterPortraitSource()}" alt="Your customized miner portrait" draggable="false">`;}
   function characterMarkup(size='large',override={}){
     const c=Object.assign({},state.character,override);
-    const hairstyleImages={short:'short.png',spiky:'anime-miner-v1.png',bob:'bob.png',long:'long.png',bun:'bun.png',buzz:'buzz.png',ponytail:'ponytail.png',wavy:'wavy.png',undercut:'undercut.png',twintails:'twintails.png',regalsweep:'regal-sweep.png',sidesweep:'side-sweep.png',flamespikes:'flame-spikes.png',texturedcrop:'textured-crop.png'};
-    const avatarImage=hairstyleImages[c.hairStyle]||hairstyleImages.spiky;
-    const maskStyle=hairstyleImages[c.hairStyle]?c.hairStyle:'spiky';
+    const avatarImage=characterPortraitSource(c.hairStyle);
+    const maskStyle=CHARACTER_PORTRAIT_IMAGES[c.hairStyle]?c.hairStyle:'spiky';
     const fashion=Object.assign({jacket:'none',gloves:'none',shoes:'boots'},state.v5?.fashion||{}),sources=renderedSources(c,maskStyle,fashion);
     const layer=(name)=>`<img class="native-cosmetic-layer native-${name}-layer" ${sources[name]?`src="${sources[name]}"`:''} alt="" draggable="false">`;
     return `<div class="miner-avatar ${size}" data-skin="${c.skin}" data-hair-style="${c.hairStyle}" data-hair-color="${c.hairColor}" data-shirt="${c.shirt}" data-pants="${c.pants}" data-accessory="${c.accessory}" data-jacket="${fashion.jacket}" data-gloves="${fashion.gloves}" data-shoes="${fashion.shoes}" aria-label="Customized miner character">
@@ -2338,8 +2391,7 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
   }
   window.japaneseMinerCharacterMarkup=characterMarkup;
   function optionButtons(key,label){return `<div class="character-option" data-character-section="${key}"><button type="button" class="character-option-toggle" aria-expanded="true"><span>${label}</span><b aria-hidden="true">⌄</b></button><div class="character-choice-grid">${CHARACTER_OPTIONS[key].map(([value,name],index)=>{const owned=cosmeticOwned(key,value),price=index===0?0:COSMETIC_PRICES[key]||0,visual=key!=='skin';return `<button type="button" data-character-key="${key}" data-character-value="${value}" class="${visual?'visual-choice ':''}${state.character[key]===value?'selected':''} ${owned?'owned':'locked'}">${visual?`<div class="choice-avatar-preview">${characterMarkup('mini',{[key]:value})}</div>`:`<span class="choice-swatch ${key}-${value}"></span>`}<span>${name}<small>${owned?'Owned':`${price.toLocaleString()} 🪙`}</small></span></button>`;}).join('')}</div></div>`;}
-  function themeButtons(){return `<div class="character-option"><h4>Bright game colors — free</h4><div class="theme-choice-grid">${COLOR_THEMES.map(([value,name])=>`<button type="button" data-color-theme="${value}" class="${state.colorTheme===value?'selected':''}"><span class="theme-swatch theme-${value}"></span><span>${name}<small>Included</small></span></button>`).join('')}</div></div>`;}
-  function renderProfile(){const player=document.getElementById('activePlayerName')?.textContent||'Miner';return `<div class="character-profile"><section class="character-preview-card"><div class="profile-nameplate"><span class="placement-kicker">Your miner</span><h3>${player}</h3><p>${state.selectedTitle||'Japanese Learner'}</p><strong class="cosmetic-balance">🪙 ${totalStoneValue().toLocaleString()} Nuggets</strong></div>${characterMarkup('large')}<div class="character-save-note">Skin tones are always free. Hair, clothes, and accessories are one-time unlocks saved to this profile.</div></section><section class="character-customizer">${themeButtons()}${optionButtons('skin','Skin tone — free')}${optionButtons('hairStyle','Hair style')}${optionButtons('hairColor','Hair color')}${optionButtons('shirt','Clothing top')}${optionButtons('pants','Clothing bottom')}${optionButtons('accessory','Accessory')}<button id="randomizeCharacterBtn" class="primary" type="button">🎲 Randomize owned style</button></section></div>`;}
+  function renderProfile(){const player=document.getElementById('activePlayerName')?.textContent||'Miner';return `<div class="character-profile"><section class="character-preview-card"><div class="profile-nameplate"><span class="placement-kicker">Your miner</span><h3>${player}</h3><p>${state.selectedTitle||'Japanese Learner'}</p><strong class="cosmetic-balance">🪙 ${totalStoneValue().toLocaleString()} Nuggets</strong></div>${characterMarkup('large')}<div class="character-save-note">Skin tones are always free. Hair, clothes, and accessories are one-time unlocks saved to this profile.</div></section><section class="character-customizer">${optionButtons('skin','Skin tone — free')}${optionButtons('hairStyle','Hair style')}${optionButtons('hairColor','Hair color')}${optionButtons('shirt','Clothing top')}${optionButtons('pants','Clothing bottom')}${optionButtons('accessory','Accessory')}<button id="randomizeCharacterBtn" class="primary" type="button">🎲 Randomize owned style</button></section></div>`;}
   function randomizeCharacter(){Object.entries(CHARACTER_OPTIONS).forEach(([key,values])=>{const available=values.filter(([value])=>cosmeticOwned(key,value));state.character[key]=available[Math.floor(Math.random()*available.length)][0];});save();renderFeatureCenter('profile');render();}
 
   window.renderJapaneseMinerCharacterShop=function(box){
@@ -2409,7 +2461,7 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
   }
 
   function addMenuItems(){const grid=document.querySelector('.game-menu-grid');if(!grid)return;const items=[['profile','🧍','Character','Customize hair, skin, and clothing'],['quests','🎯','Quests','Daily and weekly rewards'],['achievements','🏆','Achievements','Titles and milestones'],['notebook','📓','Notebook','Difficult items and personal sticky notes'],['statistics','📈','Player Stats','Accuracy and study trends'],['account','☁️','Account','Backup and transfer saves']];items.forEach(([tab,icon,name,desc])=>{if(grid.querySelector(`[data-feature-open="${tab}"],[data-menu-action="${tab}"]`))return;const b=document.createElement('button');b.type='button';b.dataset.featureOpen=tab;b.dataset.menuCategoryName=tab==='profile'||tab==='notebook'?'gear':'player';b.innerHTML=`<span>${icon}</span><strong>${name}</strong><small>${desc}</small>`;b.addEventListener('click',()=>{closeGameMenu();openFeatureCenter(tab);});grid.appendChild(b);});}
-  const renderV38=render;render=function(){ensureV38();renderV38();checkAchievements();const chip=document.querySelector('.account-chip #activePlayerName');if(chip&&state.selectedTitle)chip.title=state.selectedTitle;let mini=document.getElementById('headerCharacterAvatar');if(!mini){const holder=document.querySelector('.account-chip');if(holder){mini=document.createElement('button');mini.id='headerCharacterAvatar';mini.className='header-character-avatar';mini.type='button';mini.title='Customize character';mini.addEventListener('click',()=>openFeatureCenter('profile'));holder.prepend(mini);}}if(mini)mini.innerHTML=characterMarkup('mini');};
+  const renderV38=render;render=function(){ensureV38();renderV38();checkAchievements();const chip=document.querySelector('.account-chip #activePlayerName');if(chip&&state.selectedTitle)chip.title=state.selectedTitle;let mini=document.getElementById('headerCharacterAvatar');if(!mini){const holder=document.querySelector('.account-chip');if(holder){mini=document.createElement('button');mini.id='headerCharacterAvatar';mini.className='header-character-avatar';mini.type='button';mini.title='Customize character';mini.setAttribute('aria-label','Open character customization');mini.addEventListener('click',()=>openFeatureCenter('profile'));holder.prepend(mini);}}if(mini){mini.innerHTML=characterPortraitMarkup();const portrait=mini.querySelector('.header-avatar-photo');if(portrait)portrait.onerror=()=>{portrait.onerror=null;portrait.src='anime-miner-v1.png';};}};
   const loadV38=loadProfile;loadProfile=function(profile){loadV38(profile);ensureV38();save();};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{featureShell();addMenuItems();});else{featureShell();addMenuItems();}
 })();
@@ -2420,8 +2472,15 @@ if(activeProfileId)render();
 
 
 // v6.4.11 - Course-synced JLPT vocabulary lessons with a required word preview.
-const JLPT_VOCABULARY_LESSON_SIZE=50;
+const JLPT_VOCABULARY_LESSON_SIZE=25;
+const JLPT_VOCABULARY_LAYOUT_VERSION=25;
 const JLPT_VOCABULARY_UNLOCK_MASTERY=75;
+const JLPT_REVIEW_QUIZ_QUESTION_COUNT=25;
+  const JLPT_REVIEW_QUIZ_TIME_MS=2.5*60*1000;
+const JLPT_REVIEW_QUIZ_PASS_SCORE=75;
+const JLPT_REVIEW_AUTO_ADVANCE_DELAY_MS=650;
+let jlptReviewQuizInterval=null;
+let jlptReviewAutoAdvanceTimer=null;
 const JLPT_SECTION_SPECS=[
   {id:"vocabulary",name:"Vocabulary",icon:"語"},
   {id:"kanji",name:"Kanji",icon:"字"},
@@ -2440,6 +2499,8 @@ function ensureJlptSectionState(target=state){
   if(!target.jlptSectionSelection||typeof target.jlptSectionSelection!=="object"||Array.isArray(target.jlptSectionSelection))target.jlptSectionSelection={};
   if(!target.jlptVocabularyLevel||typeof target.jlptVocabularyLevel!=="object"||Array.isArray(target.jlptVocabularyLevel))target.jlptVocabularyLevel={};
   if(!target.jlptSectionLevel||typeof target.jlptSectionLevel!=="object"||Array.isArray(target.jlptSectionLevel))target.jlptSectionLevel={};
+  if(!target.jlptReviewCheckpoints||typeof target.jlptReviewCheckpoints!=="object"||Array.isArray(target.jlptReviewCheckpoints))target.jlptReviewCheckpoints={};
+  migrateJlptVocabularyLessonLayout(target);
   for(let stage=2;stage<stages.length;stage++){
     const section=String(target.jlptSectionSelection[stage]||"vocabulary");
     target.jlptSectionSelection[stage]=JLPT_SECTION_IDS.has(section)?section:"vocabulary";
@@ -2449,6 +2510,17 @@ function ensureJlptSectionState(target=state){
     target.jlptSectionLevel[stage].vocabulary=target.jlptVocabularyLevel[stage];
   }
   return target;
+}
+function migrateJlptVocabularyLessonLayout(target){
+  if(Number(target.jlptVocabularyLessonSize)===JLPT_VOCABULARY_LAYOUT_VERSION)return false;
+  const oldCheckpoints=target.jlptReviewCheckpoints&&typeof target.jlptReviewCheckpoints==="object"?target.jlptReviewCheckpoints:{},migrated={};
+  Object.entries(oldCheckpoints).forEach(([key,record])=>{
+    const [stage,section,evenLessonText]=key.split(":"),evenLesson=Number(evenLessonText);
+    if(section!=="vocabulary"||evenLesson<2||evenLesson%2!==0){migrated[key]=record;return;}
+    [evenLesson*2-2,evenLesson*2].forEach(newEvenLesson=>{migrated[`${stage}:vocabulary:${newEvenLesson}`]={...(record&&typeof record==="object"?record:{}),migratedFrom50WordLessons:true};});
+  });
+  if(target.jlptVocabularyLevel&&typeof target.jlptVocabularyLevel==="object")Object.keys(target.jlptVocabularyLevel).forEach(stage=>{target.jlptVocabularyLevel[stage]=Math.max(0,Number(target.jlptVocabularyLevel[stage])||0)*2;});
+  target.jlptReviewCheckpoints=migrated;target.jlptVocabularyLessonSize=JLPT_VOCABULARY_LAYOUT_VERSION;return true;
 }
 function currentJlptSection(stage=selectedStageIndex()){
   ensureJlptSectionState();
@@ -2517,7 +2589,7 @@ function jlptVocabularyLevelQuestions(stage,index){
 function jlptVocabularyLevelUnlocked(stage,index){
   stage=Number(stage);index=Number(index);
   if(index<=0)return isStageUnlocked(stage);
-  return isStageUnlocked(stage)&&jlptVocabularyLevelMastery(stage,index-1)>=JLPT_VOCABULARY_UNLOCK_MASTERY;
+  return isStageUnlocked(stage)&&jlptVocabularyLevelMastery(stage,index-1)>=JLPT_VOCABULARY_UNLOCK_MASTERY&&(index%2!==0||jlptReviewCheckpointPassed(stage,"vocabulary",index));
 }
 function highestUnlockedJlptVocabularyLevel(stage){
   const levels=jlptVocabularyLevels(stage);let highest=0;
@@ -2647,7 +2719,7 @@ function renderVocabularyCourse(stage=academyStage){
     return `<section><div class="course-subhead"><button class="course-back" data-lessons-back type="button">← All lessons</button><div><h3>${label} Vocabulary Lesson ${lesson+1}</h3><p>${items.length} words · ${mastery}% lesson mastery</p></div></div><div class="lesson-list-actions"><button data-vocab-review-again type="button">Review all words</button><button data-vocab-start class="primary" type="button" ${academyView.lessonPreviewComplete?'':'disabled'}>Start lesson</button></div><div class="word-list">${items.map(word=>{const itemMastery=jlptVocabularyWordMastery(word);return `<button class="word-row" data-word-index="${word.index}" type="button"><span class="word-main"><strong>${v3Esc(word.jp)}</strong><small>${v3Esc(word.reading)} · ${v3Esc(word.en)}</small></span><span class="word-mastery"><b>${v3Stars(itemMastery)}</b><small>${itemMastery}%</small></span></button>`;}).join('')}</div></section>`;
   }
   if(lesson!==null){academyView.lesson=null;academyView.preview=null;academyView.lessonPreviewComplete=false;}
-  return `<div class="academy-toolbar"><strong>${label} Vocabulary Lessons</strong><span>${words.length} verified words loaded · progression target: ${target.toLocaleString()}</span></div><p class="course-instruction">Course and Expedition Hub use these same lessons. Review every word before starting practice; reach ${JLPT_VOCABULARY_UNLOCK_MASTERY}% lesson mastery to open the next lesson.</p><div class="lesson-grid">${lessons.map((items,index)=>{const open=jlptVocabularyLevelUnlocked(stage,index),mastery=jlptVocabularyLevelMastery(stage,index),known=items.filter(word=>jlptVocabularyWordMastery(word)>=75).length,current=stage===selectedStageIndex()&&index===currentJlptVocabularyLevel(stage);return `<button class="lesson-button lesson-loaded ${open?'lesson-open':'lesson-locked'} ${mastery>=JLPT_VOCABULARY_UNLOCK_MASTERY?'lesson-complete':''} ${current?'lesson-current':''}" data-vocab-lesson="${index}" type="button" ${open?'':'disabled'}><strong>${open?`Lesson ${index+1}`:`🔒 Lesson ${index+1}`}</strong><span>${known}/${items.length} mastered · ${items.length} words</span>${progressBar(mastery)}</button>`;}).join('')||'<div class="academy-callout">No vocabulary words are loaded for the current course selection yet.</div>'}</div>`;
+  return `<div class="academy-toolbar"><strong>${label} Vocabulary Lessons</strong><span>${words.length} verified words loaded · progression target: ${target.toLocaleString()}</span></div><p class="course-instruction">Course and Expedition Hub use these same lessons. Reach 75% mastery in each lesson. After every two lessons, pass a 25-question randomized review quiz at 75% within two minutes to open the next lesson.</p><div class="lesson-grid">${lessons.map((items,index)=>{const open=jlptVocabularyLevelUnlocked(stage,index),mastery=jlptVocabularyLevelMastery(stage,index),known=items.filter(word=>jlptVocabularyWordMastery(word)>=75).length,current=stage===selectedStageIndex()&&index===currentJlptVocabularyLevel(stage),card=`<button class="lesson-button lesson-loaded ${open?'lesson-open':'lesson-locked'} ${mastery>=JLPT_VOCABULARY_UNLOCK_MASTERY?'lesson-complete':''} ${current?'lesson-current':''}" data-vocab-lesson="${index}" type="button" ${open?'':'disabled'}><strong>${open?`Lesson ${index+1}`:`🔒 Lesson ${index+1}`}</strong><span>${known}/${items.length} mastered · ${items.length} words</span>${progressBar(mastery)}</button>`;return `${card}${(index+1)%2===0?renderJlptReviewCheckpointCard(stage,"vocabulary",index+1):""}`;}).join('')||'<div class="academy-callout">No vocabulary words are loaded for the current course selection yet.</div>'}</div>`;
 }
 function openVocabularyLessonReview(stage,index){
   stage=Number(stage);index=Number(index);
@@ -2662,6 +2734,7 @@ function startReviewedVocabularyLesson(stage,index){
 }
 function handleVocabularyCourseAction(target,stage=academyStage){
   if(!target)return false;stage=Number(stage);
+  if(target.matches("[data-review-checkpoint-stage]")){openJlptReviewCheckpoint(Number(target.dataset.reviewCheckpointStage),String(target.dataset.reviewCheckpointSection),Number(target.dataset.reviewCheckpointLesson));return true;}
   if(target.matches("[data-vocab-lesson]")){openVocabularyLessonReview(stage,Number(target.dataset.vocabLesson));return true;}
   if(target.matches("[data-lessons-back]")){academyView.lesson=null;academyView.word=null;academyView.preview=null;academyView.lessonPreviewComplete=false;renderAcademy();return true;}
   if(target.matches("[data-vocab-preview-back]")){academyView.preview=Math.max(0,Number(academyView.preview)-1);renderAcademy();return true;}
@@ -2679,7 +2752,7 @@ function handleVocabularyCourseAction(target,stage=academyStage){
 
 // v6.4.14 - Give Kanji, Grammar, and Reading the same lesson flow as Vocabulary.
 const JLPT_SECTION_LESSON_CONFIG={
-  vocabulary:{size:50,singular:"word",plural:"words"},
+  vocabulary:{size:25,singular:"word",plural:"words"},
   kanji:{size:20,singular:"kanji",plural:"kanji"},
   grammar:{size:10,singular:"grammar point",plural:"grammar points"},
   reading:{size:4,singular:"reading",plural:"readings"}
@@ -2711,6 +2784,46 @@ function jlptSectionLevelMastery(stage,section,index){
   if(section==="vocabulary")return jlptVocabularyLevelMastery(stage,index);
   return averageMastery((jlptSectionLevels(stage,section)[Number(index)]||[]).map(item=>item.masteryId));
 }
+function jlptReviewCheckpointKey(stage,section,evenLesson){return `${Number(stage)}:${String(section)}:${Number(evenLesson)}`;}
+function jlptReviewCheckpointResult(stage,section,evenLesson){ensureJlptSectionState();return state.jlptReviewCheckpoints[jlptReviewCheckpointKey(stage,section,evenLesson)]||{best:0,passed:false};}
+function jlptReviewCheckpointPassed(stage,section,evenLesson){return jlptReviewCheckpointResult(stage,section,evenLesson).passed===true;}
+function jlptReviewCheckpointAvailable(stage,section,evenLesson){
+  stage=Number(stage);section=String(section);evenLesson=Number(evenLesson);
+  const levels=jlptSectionLevels(stage,section),first=evenLesson-2,second=evenLesson-1;
+  return isStageUnlocked(stage)&&evenLesson>=2&&evenLesson%2===0&&!!levels[first]&&!!levels[second]&&jlptSectionLevelMastery(stage,section,first)>=JLPT_VOCABULARY_UNLOCK_MASTERY&&jlptSectionLevelMastery(stage,section,second)>=JLPT_VOCABULARY_UNLOCK_MASTERY;
+}
+function jlptReviewCheckpointChoices(answer,values){
+  const wrong=[...new Set(values.map(value=>String(value||"")).filter(value=>value&&value!==String(answer)))];
+  return shuffle([String(answer),...shuffle(wrong).slice(0,3)]);
+}
+function jlptReviewCheckpointQuestionBank(stage,section,evenLesson){
+  stage=Number(stage);section=String(section);evenLesson=Number(evenLesson);
+  const rawPair=jlptSectionLevels(stage,section).slice(evenLesson-2,evenLesson).flat(),ids=new Set(rawPair.map(item=>String(item.masteryId))),all=jlptSectionItems(stage,section),items=all.filter(item=>ids.has(String(item.masteryId))),bank=[];
+  const add=(id,display,prompt,answer,values)=>{const options=jlptReviewCheckpointChoices(answer,values);if(String(answer||"")&&options.length>=2)bank.push({id,display:String(display||""),prompt:String(prompt||""),answer:String(answer),options});};
+  if(section==="vocabulary")items.forEach(item=>{
+    add(`${item.masteryId}:meaning`,item.primary,"Choose the correct meaning.",item.meaning,items.map(entry=>entry.meaning));
+    if(item.secondary&&item.secondary!==item.primary)add(`${item.masteryId}:reading`,item.primary,"Choose the correct reading.",item.secondary,items.map(entry=>entry.secondary));
+  });
+  if(section==="kanji")items.forEach(item=>{
+    add(`${item.masteryId}:meaning`,item.primary,"Choose this kanji's meaning.",item.meaning,items.map(entry=>entry.meaning));
+    if(item.secondary&&item.secondary!=="—")add(`${item.masteryId}:reading`,item.primary,"Choose the correct reading.",item.secondary,items.map(entry=>entry.secondary));
+  });
+  if(section==="grammar")items.forEach(item=>add(`${item.masteryId}:grammar`,item.detail,"Which grammar point is used?",item.primary,items.map(entry=>entry.primary)));
+  if(section==="reading")items.forEach(item=>add(`${item.masteryId}:reading`,item.detail,item.question,item.answer,items.map(entry=>entry.answer)));
+  return bank;
+}
+function buildJlptReviewCheckpointQuestions(stage,section,evenLesson){
+  const bank=jlptReviewCheckpointQuestionBank(stage,section,evenLesson),result=[];
+  while(bank.length&&result.length<JLPT_REVIEW_QUIZ_QUESTION_COUNT){
+    shuffle([...bank]).forEach(question=>{if(result.length<JLPT_REVIEW_QUIZ_QUESTION_COUNT)result.push({...question,options:shuffle([...question.options])});});
+  }
+  return result;
+}
+function renderJlptReviewCheckpointCard(stage,section,evenLesson,world=false){
+  const result=jlptReviewCheckpointResult(stage,section,evenLesson),passed=result.passed===true,available=jlptReviewCheckpointAvailable(stage,section,evenLesson),open=passed||available,best=Math.max(0,Number(result.best)||0),pair=`Lessons ${evenLesson-1}–${evenLesson}`;
+  if(world)return `<button data-world-review-checkpoint-stage="${stage}" data-world-review-checkpoint-section="${section}" data-world-review-checkpoint-lesson="${evenLesson}" class="jlpt-vocabulary-level jlpt-review-checkpoint ${open?'open':'locked'} ${passed?'complete':''}" ${open?'':'disabled'}><span>${passed?'✓':open?'🧠':'🔒'}</span><strong>${pair} Quiz</strong><small>${passed?`${best}% best · Passed`:available?'25 questions · 2:30 · Need 75%':`Reach 75% in both lessons`}</small><i><b style="width:${passed?100:best}%"></b></i></button>`;
+  return `<button class="lesson-button jlpt-review-checkpoint ${open?'lesson-open':'lesson-locked'} ${passed?'lesson-complete':''}" data-review-checkpoint-stage="${stage}" data-review-checkpoint-section="${section}" data-review-checkpoint-lesson="${evenLesson}" type="button" ${open?'':'disabled'}><strong>${passed?'✓':open?'🧠':'🔒'} ${pair} Review Quiz</strong><span>${passed?`${best}% best · Passed`:available?'25 randomized questions · 2:30 · Pass at 75%':`Reach 75% in Lessons ${evenLesson-1} and ${evenLesson}`}</span>${progressBar(passed?100:best)}</button>`;
+}
 function jlptCourseQuestionMatchesItem(question,item){
   if(!question||!item||Number(question.stage)!==Number(item.stage))return false;
   if(Number(item.stage)>2)return String(question.courseId||"")===`jlpt${item.stage}:${item.section}:${item.sourceIndex}`;
@@ -2728,7 +2841,7 @@ function jlptSectionLevelUnlocked(stage,section,index){
   if(section==="vocabulary")return jlptVocabularyLevelUnlocked(stage,index);
   stage=Number(stage);index=Number(index);
   if(index<=0)return isStageUnlocked(stage);
-  return isStageUnlocked(stage)&&jlptSectionLevelMastery(stage,section,index-1)>=JLPT_VOCABULARY_UNLOCK_MASTERY;
+  return isStageUnlocked(stage)&&jlptSectionLevelMastery(stage,section,index-1)>=JLPT_VOCABULARY_UNLOCK_MASTERY&&(index%2!==0||jlptReviewCheckpointPassed(stage,section,index));
 }
 function highestUnlockedJlptSectionLevel(stage,section){
   if(section==="vocabulary")return highestUnlockedJlptVocabularyLevel(stage);
@@ -2778,7 +2891,7 @@ validJlptQuestionForSelection=function(question){
   const section=currentJlptSection(stage);if(jlptQuestionSection(question)!==section)return false;
   return jlptSectionLevelQuestions(stage,section,currentJlptSectionLevel(stage,section)).some(candidate=>String(candidate.id)===String(question.id));
 };
-function resetJlptLessonView(){academyView.lesson=null;academyView.word=null;academyView.sectionItem=null;academyView.preview=null;academyView.lessonPreviewComplete=false;academyView.lessonSection=null;}
+function resetJlptLessonView(){academyView.lesson=null;academyView.word=null;academyView.sectionItem=null;academyView.preview=null;academyView.lessonPreviewComplete=false;academyView.lessonSection=null;academyView.checkpointQuiz=null;clearJlptReviewQuizClock();syncJlptReviewQuizTabs(false);}
 function jlptSectionTarget(stage,section){
   stage=Number(stage);if(stage===2)return jlptSectionItems(stage,section).length;
   const course=JLPT_COURSES[stage];if(section==="kanji")return Number(course?.kanjiTarget||0);if(section==="grammar")return Number(course?.grammarTarget||0);return jlptSectionItems(stage,section).length;
@@ -2815,7 +2928,7 @@ function renderJlptSectionCourse(stage=academyStage,section=academyTab){
     return `<section><div class="course-subhead"><button class="course-back" data-lessons-back type="button">← All lessons</button><div><h3>${label} ${spec.name} Lesson ${lesson+1}</h3><p>${lessonItems.length} ${config.plural} · ${mastery}% lesson mastery</p></div></div><div class="lesson-list-actions"><button data-section-review-again type="button">Review all items</button><button data-section-start class="primary" type="button" ${academyView.lessonPreviewComplete?'':'disabled'}>Start lesson</button></div><div class="word-list">${lessonItems.map(item=>{const mastery=academyItemMastery(item.masteryId);return `<button class="word-row" data-section-item="${item.sourceIndex}" type="button"><span class="word-main"><strong>${v3Esc(item.primary)}</strong><small>${v3Esc(item.secondary||item.meaning||"")}</small></span><span class="word-mastery"><b>${v3Stars(mastery)}</b><small>${mastery}%</small></span></button>`;}).join('')}</div></section>`;
   }
   if(lesson!==null)resetJlptLessonView();
-  return `<div class="academy-toolbar"><strong>${label} ${spec.name} Lessons</strong><span>${items.length} interactive ${config.plural} loaded · progression target: ${target.toLocaleString()}</span></div><p class="course-instruction">Course and Expedition Hub use these same lessons. Review every ${config.singular} before practice; reach ${JLPT_VOCABULARY_UNLOCK_MASTERY}% lesson mastery to open the next lesson.</p><div class="lesson-grid">${lessons.map((lessonItems,index)=>{const open=jlptSectionLevelUnlocked(stage,section,index),mastery=jlptSectionLevelMastery(stage,section,index),known=lessonItems.filter(item=>academyItemMastery(item.masteryId)>=75).length,current=stage===selectedStageIndex()&&section===currentJlptSection(stage)&&index===currentJlptSectionLevel(stage,section);return `<button class="lesson-button lesson-loaded ${open?'lesson-open':'lesson-locked'} ${mastery>=JLPT_VOCABULARY_UNLOCK_MASTERY?'lesson-complete':''} ${current?'lesson-current':''}" data-section-lesson="${index}" type="button" ${open?'':'disabled'}><strong>${open?`Lesson ${index+1}`:`🔒 Lesson ${index+1}`}</strong><span>${known}/${lessonItems.length} mastered · ${lessonItems.length} ${config.plural}</span>${progressBar(mastery)}</button>`;}).join('')||`<div class="academy-callout">No ${config.plural} are loaded for this course yet.</div>`}</div>`;
+  return `<div class="academy-toolbar"><strong>${label} ${spec.name} Lessons</strong><span>${items.length} interactive ${config.plural} loaded · progression target: ${target.toLocaleString()}</span></div><p class="course-instruction">Course and Expedition Hub use these same lessons. Reach 75% mastery in each lesson. After every two lessons, pass a 25-question randomized review quiz at 75% within two minutes to open the next lesson.</p><div class="lesson-grid">${lessons.map((lessonItems,index)=>{const open=jlptSectionLevelUnlocked(stage,section,index),mastery=jlptSectionLevelMastery(stage,section,index),known=lessonItems.filter(item=>academyItemMastery(item.masteryId)>=75).length,current=stage===selectedStageIndex()&&section===currentJlptSection(stage)&&index===currentJlptSectionLevel(stage,section),card=`<button class="lesson-button lesson-loaded ${open?'lesson-open':'lesson-locked'} ${mastery>=JLPT_VOCABULARY_UNLOCK_MASTERY?'lesson-complete':''} ${current?'lesson-current':''}" data-section-lesson="${index}" type="button" ${open?'':'disabled'}><strong>${open?`Lesson ${index+1}`:`🔒 Lesson ${index+1}`}</strong><span>${known}/${lessonItems.length} mastered · ${lessonItems.length} ${config.plural}</span>${progressBar(mastery)}</button>`;return `${card}${(index+1)%2===0?renderJlptReviewCheckpointCard(stage,section,index+1):""}`;}).join('')||`<div class="academy-callout">No ${config.plural} are loaded for this course yet.</div>`}</div>`;
 }
 function openJlptSectionLessonReview(stage,section,index){
   stage=Number(stage);section=String(section||"vocabulary");index=Number(index);
@@ -2834,6 +2947,7 @@ function practiceJlptSectionItem(stage,section,item){
 }
 function handleJlptSectionCourseAction(target,stage=academyStage,section=academyTab){
   if(!target||section==="vocabulary")return false;stage=Number(stage);
+  if(target.matches("[data-review-checkpoint-stage]")){openJlptReviewCheckpoint(Number(target.dataset.reviewCheckpointStage),String(target.dataset.reviewCheckpointSection),Number(target.dataset.reviewCheckpointLesson));return true;}
   const levels=jlptSectionLevels(stage,section),lesson=Number(academyView.lesson),items=levels[lesson]||[];
   if(target.matches("[data-section-lesson]")){openJlptSectionLessonReview(stage,section,Number(target.dataset.sectionLesson));return true;}
   if(target.matches("[data-lessons-back]")){resetJlptLessonView();renderAcademy();return true;}
@@ -2916,3 +3030,69 @@ loadProfile=function(profile){const result=loadProfileV646(profile);ensureKanaFa
 ensureKanaFamilyState();
 repairActiveKanaQuestion();
 if(activeProfileId)render();
+
+// v6.4.17 - Required two-lesson review checkpoints for every JLPT course section.
+function clearJlptReviewAutoAdvance(){if(jlptReviewAutoAdvanceTimer){clearTimeout(jlptReviewAutoAdvanceTimer);jlptReviewAutoAdvanceTimer=null;}}
+function clearJlptReviewQuizClock(){if(jlptReviewQuizInterval){clearInterval(jlptReviewQuizInterval);jlptReviewQuizInterval=null;}clearJlptReviewAutoAdvance();}
+function advanceJlptReviewCheckpoint(){
+  const quiz=academyView.checkpointQuiz;if(!quiz||quiz.finished||!quiz.answered)return false;clearJlptReviewAutoAdvance();
+  if(quiz.current>=JLPT_REVIEW_QUIZ_QUESTION_COUNT-1)return finishJlptReviewCheckpoint("completed");
+  quiz.current+=1;quiz.answered=false;quiz.selected=null;renderAcademy();return true;
+}
+function scheduleJlptReviewAutoAdvance(quiz=academyView.checkpointQuiz){
+  clearJlptReviewAutoAdvance();if(!quiz||quiz.finished||!quiz.answered)return false;const current=Number(quiz.current);
+  jlptReviewAutoAdvanceTimer=setTimeout(()=>{jlptReviewAutoAdvanceTimer=null;if(academyView.checkpointQuiz!==quiz||quiz.finished||!quiz.answered||Number(quiz.current)!==current)return;if(jlptReviewQuizRemainingMs(quiz)<=0)finishJlptReviewCheckpoint("timeout");else advanceJlptReviewCheckpoint();},JLPT_REVIEW_AUTO_ADVANCE_DELAY_MS);return true;
+}
+function syncJlptReviewQuizTabs(disabled){document.querySelectorAll("[data-academy-tab]").forEach(button=>{button.disabled=!!disabled;button.setAttribute("aria-disabled",String(!!disabled));});}
+function jlptReviewQuizRemainingMs(quiz=academyView.checkpointQuiz){return quiz&&!quiz.finished?Math.max(0,Number(quiz.deadline)-Date.now()):0;}
+function jlptReviewQuizTimeLabel(ms){const total=Math.max(0,Math.ceil(Number(ms||0)/1000));return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;}
+function finishJlptReviewCheckpoint(reason="completed"){
+  const quiz=academyView.checkpointQuiz;if(!quiz||quiz.finished)return false;
+  clearJlptReviewQuizClock();quiz.finished=true;quiz.finishReason=reason;quiz.finishedAt=Date.now();quiz.score=Math.round(Number(quiz.correct||0)/JLPT_REVIEW_QUIZ_QUESTION_COUNT*100);quiz.passed=quiz.score>=JLPT_REVIEW_QUIZ_PASS_SCORE;
+  ensureJlptSectionState();const key=jlptReviewCheckpointKey(quiz.stage,quiz.section,quiz.evenLesson),previous=jlptReviewCheckpointResult(quiz.stage,quiz.section,quiz.evenLesson);
+  state.jlptReviewCheckpoints[key]={best:Math.max(Number(previous.best)||0,quiz.score),lastScore:quiz.score,attempts:Number(previous.attempts||0)+1,passed:previous.passed===true||quiz.passed,passedAt:quiz.passed?Date.now():Number(previous.passedAt||0)};
+  const nextExists=!!jlptSectionLevels(quiz.stage,quiz.section)[quiz.evenLesson];
+  save();renderAcademy();setMessage(quiz.passed?(nextExists?`Review quiz passed with ${quiz.score}%. Lesson ${quiz.evenLesson+1} is now available.`:`Final lesson-pair review passed with ${quiz.score}%.`):`Review quiz score: ${quiz.score}%. Reach 75% to continue.`,quiz.passed?"correct":"wrong");return true;
+}
+function jlptReviewQuizTick(){
+  const quiz=academyView.checkpointQuiz;if(!quiz||quiz.finished){clearJlptReviewQuizClock();return;}
+  const remaining=jlptReviewQuizRemainingMs(quiz),timer=document.getElementById("jlptReviewQuizTimer");if(timer){timer.textContent=jlptReviewQuizTimeLabel(remaining);timer.classList.toggle("urgent",remaining<=30000);}
+  if(remaining<=0)finishJlptReviewCheckpoint("timeout");
+}
+function startJlptReviewQuizClock(){if(jlptReviewQuizInterval)return;jlptReviewQuizInterval=setInterval(jlptReviewQuizTick,250);jlptReviewQuizTick();}
+function renderJlptReviewCheckpointQuiz(){
+  const quiz=academyView.checkpointQuiz;if(!quiz)return "";const spec=jlptSectionSpec(quiz.section),pair=`Lessons ${quiz.evenLesson-1}–${quiz.evenLesson}`,levels=jlptSectionLevels(quiz.stage,quiz.section),nextExists=!!levels[quiz.evenLesson];
+  if(quiz.finished){
+    const record=jlptReviewCheckpointResult(quiz.stage,quiz.section,quiz.evenLesson),gatePassed=record.passed===true,elapsed=Math.min(150,Math.max(0,Math.ceil((Number(quiz.finishedAt)-Number(quiz.startedAt))/1000))),unanswered=JLPT_REVIEW_QUIZ_QUESTION_COUNT-Number(quiz.answeredCount||0);
+    return `<section class="jlpt-review-quiz-result ${quiz.passed?'passed':'failed'}"><div class="lesson-review-check">${quiz.passed?'✓':'!'}</div><div class="course-kicker">${vocabularyCourseLabel(quiz.stage)} ${spec.name} · ${pair} checkpoint</div><h3>${quiz.passed?'Review quiz passed':'Review quiz needs another try'}</h3><div class="jlpt-review-result-score">${quiz.score}%</div><p>${quiz.correct}/${JLPT_REVIEW_QUIZ_QUESTION_COUNT} correct · ${unanswered} unanswered · ${elapsed} seconds used</p><strong>${quiz.passed?(nextExists?`Lesson ${quiz.evenLesson+1} is now available.`:'Final lesson-pair review complete.'):gatePassed?'This checkpoint remains passed from your earlier score.':'Score at least 75% (19 correct answers) to unlock the next lesson.'}</strong><div class="lesson-preview-actions"><button data-checkpoint-back type="button">← All lessons</button><button data-checkpoint-retry type="button">Try another random set</button>${gatePassed&&nextExists?`<button data-checkpoint-continue class="primary" type="button">Continue to Lesson ${quiz.evenLesson+1}</button>`:""}</div></section>`;
+  }
+  const question=quiz.questions[quiz.current],remaining=jlptReviewQuizRemainingMs(quiz),progress=(quiz.current+1)/JLPT_REVIEW_QUIZ_QUESTION_COUNT*100;
+  return `<section class="course-focus jlpt-review-quiz"><header><div><div class="course-kicker">${vocabularyCourseLabel(quiz.stage)} ${spec.name} · ${pair} Review Quiz</div><h3>Question ${quiz.current+1} of ${JLPT_REVIEW_QUIZ_QUESTION_COUNT}</h3><p>${quiz.correct} correct so far · 75% required to pass</p></div><strong id="jlptReviewQuizTimer" class="jlpt-review-timer ${remaining<=30000?'urgent':''}" aria-live="polite">${jlptReviewQuizTimeLabel(remaining)}</strong></header>${progressBar(progress)}<article class="jlpt-review-question"><div class="jlpt-review-question-display">${v3Esc(question.display)}</div><p>${v3Esc(question.prompt)}</p><div class="course-answer-grid">${question.options.map((option,index)=>{const correct=quiz.answered&&option===question.answer,wrong=quiz.answered&&option===quiz.selected&&option!==question.answer;return `<button data-checkpoint-answer="${index}" class="${correct?'answer-good':wrong?'answer-bad':''}" type="button" ${quiz.answered?'disabled':''}>${v3Esc(option)}</button>`;}).join("")}</div><div class="course-feedback" aria-live="polite">${quiz.answered?(quiz.selected===question.answer?'✅ Correct!':`❌ Correct answer: <strong>${v3Esc(question.answer)}</strong>`):"Choose the best answer before time runs out."}</div></article><div class="lesson-preview-actions"><button data-checkpoint-quit type="button">Quit quiz</button>${quiz.answered?'<span class="jlpt-review-auto-advance" role="status">Next question loading automatically…</span>':""}</div></section>`;
+}
+function leaveJlptReviewCheckpoint(){clearJlptReviewQuizClock();academyView.checkpointQuiz=null;syncJlptReviewQuizTabs(false);resetJlptLessonView();renderAcademy();}
+function openJlptReviewCheckpoint(stage,section,evenLesson){
+  stage=Number(stage);section=String(section);evenLesson=Number(evenLesson);
+  if(!JLPT_SECTION_IDS.has(section)||(!jlptReviewCheckpointAvailable(stage,section,evenLesson)&&!jlptReviewCheckpointPassed(stage,section,evenLesson))){setMessage(`Reach 75% mastery in Lessons ${evenLesson-1} and ${evenLesson} before starting this review quiz.`,"wrong");return false;}
+  const quizQuestions=buildJlptReviewCheckpointQuestions(stage,section,evenLesson);if(quizQuestions.length!==JLPT_REVIEW_QUIZ_QUESTION_COUNT){setMessage("This review quiz does not have enough lesson questions yet.","wrong");return false;}
+  openAcademy(stage);academyTab=section;academyView.lesson=null;academyView.word=null;academyView.sectionItem=null;academyView.preview=null;academyView.lessonSection=section;academyView.quiz=null;academyView.checkpointQuiz={stage,section,evenLesson,questions:quizQuestions,current:0,correct:0,answeredCount:0,answered:false,selected:null,startedAt:Date.now(),deadline:Date.now()+JLPT_REVIEW_QUIZ_TIME_MS,finished:false,score:0,passed:false};
+  updateAcademyChrome();syncJlptReviewQuizTabs(true);clearJlptReviewQuizClock();renderAcademy();return true;
+}
+function handleJlptReviewCheckpointAction(target){
+  const quiz=academyView.checkpointQuiz;if(!target||!quiz)return false;
+  if(target.matches("[data-checkpoint-answer]")){
+    if(quiz.finished||quiz.answered)return true;if(jlptReviewQuizRemainingMs(quiz)<=0){finishJlptReviewCheckpoint("timeout");return true;}
+    const question=quiz.questions[quiz.current],option=question.options[Number(target.dataset.checkpointAnswer)];quiz.selected=option;quiz.answered=true;quiz.answeredCount=Number(quiz.answeredCount||0)+1;if(option===question.answer)quiz.correct=Number(quiz.correct||0)+1;playFeedbackSound(option===question.answer);renderAcademy();scheduleJlptReviewAutoAdvance(quiz);return true;
+  }
+  if(target.matches("[data-checkpoint-next]")){advanceJlptReviewCheckpoint();return true;}
+  if(target.matches("[data-checkpoint-retry]")){openJlptReviewCheckpoint(quiz.stage,quiz.section,quiz.evenLesson);return true;}
+  if(target.matches("[data-checkpoint-continue]")){const {stage,section,evenLesson}=quiz;clearJlptReviewQuizClock();academyView.checkpointQuiz=null;syncJlptReviewQuizTabs(false);openJlptSectionLessonReview(stage,section,evenLesson);return true;}
+  if(target.matches("[data-checkpoint-back],[data-checkpoint-quit]")){leaveJlptReviewCheckpoint();return true;}
+  return false;
+}
+const closeAcademyV6417Review=closeAcademy;
+closeAcademy=function(){clearJlptReviewQuizClock();if(academyView)academyView.checkpointQuiz=null;syncJlptReviewQuizTabs(false);return closeAcademyV6417Review();};
+const renderAcademyV6417Review=renderAcademy;
+renderAcademy=function(){
+  if(academyView.checkpointQuiz){updateAcademyChrome();const box=document.getElementById("academyContent");if(!box)return;syncJlptReviewQuizTabs(true);box.innerHTML=renderJlptReviewCheckpointQuiz();box.onclick=event=>{const target=event.target.closest("button");if(target)handleJlptReviewCheckpointAction(target);};if(!academyView.checkpointQuiz.finished)startJlptReviewQuizClock();return;}
+  syncJlptReviewQuizTabs(false);return renderAcademyV6417Review();
+};
