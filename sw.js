@@ -1,4 +1,4 @@
-const CACHE_NAME='japanese-miner-v6.4.40-matching-character-clothes';
+const CACHE_NAME='japanese-miner-v6.4.42-clothing-preview-fix';
 const APP_SHELL=[
   './',
   './index.html',
