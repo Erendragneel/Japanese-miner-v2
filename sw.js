@@ -1,4 +1,4 @@
-const CACHE_NAME='japanese-miner-v6.4.50-direct-pants-artwork';
+const CACHE_NAME='japanese-miner-v6.4.52-accessory-redesign-feedback-removed';
 const APP_SHELL=[
   './',
   './index.html',
