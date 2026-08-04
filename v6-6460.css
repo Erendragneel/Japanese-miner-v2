@@ -390,7 +390,7 @@ input,select,textarea{font:inherit;font-size:16px}
 
 /* v6.4.42 textured clothing artwork, with the lower-body layer clipped below the fixed belt. */
 .native-shirt-layer{filter:saturate(1.04) contrast(1.03)}
-.native-pants-layer{clip-path:inset(44% 0 0 0);filter:saturate(1.04) contrast(1.03)}
+.native-pants-layer{clip-path:inset(44% 0 0 0);filter:none}
 
 /* v6.4.43 one shared jacket cut for every top; only the color changes. */
 .miner-avatar[data-shirt="miner"] .native-shirt-layer{filter:hue-rotate(225deg) saturate(1.7) brightness(1.16)!important}
@@ -401,12 +401,6 @@ input,select,textarea{font:inherit;font-size:16px}
 .miner-avatar[data-shirt="casual"] .native-shirt-layer{filter:hue-rotate(300deg) saturate(1.28) brightness(.92)!important}
 
 /* v6.4.48 one textured denim source for all bottoms; only its color changes. */
-.miner-avatar[data-pants="denim"] .native-pants-layer{filter:sepia(1) saturate(2.1) hue-rotate(165deg) brightness(.85)!important}
-.miner-avatar[data-pants="black"] .native-pants-layer{filter:grayscale(1) brightness(.48) contrast(1.22)!important}
-.miner-avatar[data-pants="khaki"] .native-pants-layer{filter:sepia(1) saturate(.85) hue-rotate(342deg) brightness(1.12)!important}
-.miner-avatar[data-pants="white"] .native-pants-layer{filter:grayscale(1) brightness(1.9) contrast(.8)!important}
-.miner-avatar[data-pants="purple"] .native-pants-layer{filter:sepia(1) saturate(2.1) hue-rotate(250deg) brightness(.88)!important}
-.miner-avatar[data-pants="red"] .native-pants-layer{filter:sepia(1) saturate(2.6) hue-rotate(320deg) brightness(.92)!important}
 
 @media(max-height:500px) and (orientation:landscape){
  .mine{min-height:420px}

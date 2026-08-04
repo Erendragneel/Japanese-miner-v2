@@ -1,4 +1,4 @@
-const CACHE_NAME='japanese-miner-v6.4.49-neutral-pants-coloring';
+const CACHE_NAME='japanese-miner-v6.4.50-direct-pants-artwork';
 const APP_SHELL=[
   './',
   './index.html',

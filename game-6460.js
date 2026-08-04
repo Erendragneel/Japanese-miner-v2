@@ -2361,7 +2361,10 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
       skin:art('skin',c.skin),
       hair:art('hair',c.hairColor),
       shirt:jacket!=='none'?art('jacket',jacket):art('shirt','armor'),
-      pants:art('pants','black'),
+   // Each color has its own textured, transparent pants artwork.  Do not start
+   // from black and tint it: filters flatten the fabric and turn light colors
+   // muddy.
+   pants:art('pants',c.pants),
       gloves:gloves==='none'?'':art('gloves',gloves),
       shoes:art('shoes',shoes)
     };
