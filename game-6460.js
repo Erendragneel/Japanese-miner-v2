@@ -2360,7 +2360,7 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
     return {
       skin:art('skin',c.skin),
       hair:art('hair',c.hairColor),
-      shirt:jacket!=='none'?art('jacket',jacket):art('shirt',c.shirt),
+      shirt:jacket!=='none'?art('jacket',jacket):art('shirt','casual'),
       pants:art('pants',c.pants),
       gloves:gloves==='none'?'':art('gloves',gloves),
       shoes:art('shoes',shoes)

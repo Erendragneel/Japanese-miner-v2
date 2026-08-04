@@ -392,6 +392,14 @@ input,select,textarea{font:inherit;font-size:16px}
 .native-shirt-layer{filter:saturate(1.04) contrast(1.03)}
 .native-pants-layer{clip-path:polygon(29% 47%,47% 47%,50% 66%,53% 47%,71% 47%,75% 89%,58% 100%,51% 75%,44% 100%,25% 89%);filter:saturate(1.04) contrast(1.03)}
 
+/* v6.4.43 one shared jacket cut for every top; only the color changes. */
+.miner-avatar[data-shirt="miner"] .native-shirt-layer{filter:hue-rotate(145deg) saturate(1.45) brightness(1.12)!important}
+.miner-avatar[data-shirt="academy"] .native-shirt-layer{filter:hue-rotate(42deg) saturate(1.35) brightness(.98)!important}
+.miner-avatar[data-shirt="hoodie"] .native-shirt-layer{filter:hue-rotate(88deg) saturate(1.32) brightness(1.02)!important}
+.miner-avatar[data-shirt="festival"] .native-shirt-layer{filter:hue-rotate(142deg) saturate(1.38) brightness(1.08)!important}
+.miner-avatar[data-shirt="armor"] .native-shirt-layer{filter:hue-rotate(0deg) saturate(1.12) brightness(1.05)!important}
+.miner-avatar[data-shirt="casual"] .native-shirt-layer{filter:hue-rotate(15deg) saturate(.98) brightness(.95)!important}
+
 @media(max-height:500px) and (orientation:landscape){
  .mine{min-height:420px}
  .v6-coach-popover{max-height:calc(100dvh - 120px)}
