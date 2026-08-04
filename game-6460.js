@@ -2361,7 +2361,7 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
       skin:art('skin',c.skin),
       hair:art('hair',c.hairColor),
       shirt:jacket!=='none'?art('jacket',jacket):art('shirt','armor'),
-      pants:art('pants',c.pants),
+      pants:art('pants','denim'),
       gloves:gloves==='none'?'':art('gloves',gloves),
       shoes:art('shoes',shoes)
     };

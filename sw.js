@@ -1,4 +1,4 @@
-const CACHE_NAME='japanese-miner-v6.4.46-red-top-option';
+const CACHE_NAME='japanese-miner-v6.4.48-uniform-pants-colors';
 const APP_SHELL=[
   './',
   './index.html',
