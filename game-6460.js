@@ -2346,7 +2346,7 @@ if(state?.colorTheme)document.body.dataset.theme=state.colorTheme;
     skin:[['light','Light'],['warm','Warm'],['tan','Tan'],['deep','Deep']],
     hairStyle:[['short','Short'],['spiky','Spiky'],['bob','Bob'],['long','Long'],['bun','Bun'],['buzz','Buzz'],['ponytail','Ponytail'],['wavy','Wavy'],['undercut','Undercut'],['twintails','Twin Tails'],['regalsweep','Regal Sweep'],['sidesweep','Side Sweep'],['flamespikes','Flame Spikes'],['texturedcrop','Textured Crop']],
     hairColor:[['black','Black'],['brown','Brown'],['blonde','Blonde'],['red','Red'],['blue','Blue'],['pink','Pink'],['silver','Silver'],['purple','Purple'],['teal','Teal'],['green','Emerald Green']],
-    shirt:[['miner','Golden'],['academy','Blue'],['hoodie','Purple'],['festival','Rose Pink'],['armor','Teal'],['casual','Green']],
+    shirt:[['miner','Golden'],['academy','Blue'],['hoodie','Purple'],['festival','Rose Pink'],['armor','Red'],['casual','Green']],
     pants:[['denim','Denim Blue'],['black','Black'],['khaki','Khaki'],['white','White'],['purple','Purple'],['red','Red']],
     accessory:[['none','None'],['glasses','Glasses'],['headband','Headband'],['helmet','Miner Helmet'],['earrings','Earrings'],['scarf','Scarf']]
   };

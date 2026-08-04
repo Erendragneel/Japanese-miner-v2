@@ -393,12 +393,12 @@ input,select,textarea{font:inherit;font-size:16px}
 .native-pants-layer{clip-path:polygon(29% 47%,47% 47%,50% 66%,53% 47%,71% 47%,75% 89%,58% 100%,51% 75%,44% 100%,25% 89%);filter:saturate(1.04) contrast(1.03)}
 
 /* v6.4.43 one shared jacket cut for every top; only the color changes. */
-.miner-avatar[data-shirt="miner"] .native-shirt-layer{filter:hue-rotate(145deg) saturate(1.45) brightness(1.12)!important}
+.miner-avatar[data-shirt="miner"] .native-shirt-layer{filter:hue-rotate(225deg) saturate(1.7) brightness(1.16)!important}
 .miner-avatar[data-shirt="academy"] .native-shirt-layer{filter:hue-rotate(42deg) saturate(1.35) brightness(.98)!important}
 .miner-avatar[data-shirt="hoodie"] .native-shirt-layer{filter:hue-rotate(88deg) saturate(1.32) brightness(1.02)!important}
-.miner-avatar[data-shirt="festival"] .native-shirt-layer{filter:hue-rotate(142deg) saturate(1.38) brightness(1.08)!important}
-.miner-avatar[data-shirt="armor"] .native-shirt-layer{filter:hue-rotate(0deg) saturate(1.12) brightness(1.05)!important}
-.miner-avatar[data-shirt="casual"] .native-shirt-layer{filter:hue-rotate(15deg) saturate(.98) brightness(.95)!important}
+.miner-avatar[data-shirt="festival"] .native-shirt-layer{filter:hue-rotate(150deg) saturate(1.8) brightness(1.13)!important}
+.miner-avatar[data-shirt="armor"] .native-shirt-layer{filter:hue-rotate(180deg) saturate(1.8) brightness(1.04)!important}
+.miner-avatar[data-shirt="casual"] .native-shirt-layer{filter:hue-rotate(300deg) saturate(1.28) brightness(.92)!important}
 
 @media(max-height:500px) and (orientation:landscape){
  .mine{min-height:420px}
