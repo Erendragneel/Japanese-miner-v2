@@ -1,4 +1,4 @@
-const CACHE_NAME='japanese-miner-v6.4.80-discord-feedback';
+const CACHE_NAME='japanese-miner-v6.4.81-discord-feedback-cleanup';
 const APP_SHELL=[
   './',
   './index.html',
