@@ -1,4 +1,4 @@
-const CACHE_NAME='japanese-miner-v6.4.70-fitted-accessory-restore';
+const CACHE_NAME='japanese-miner-v6.4.80-discord-feedback';
 const APP_SHELL=[
   './',
   './index.html',
